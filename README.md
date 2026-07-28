@@ -6,6 +6,18 @@ from block statements, functions, and subroutines.
 
 ![MacBasic app icon](Resources/MacBasicIcon.png)
 
+`.bas` source documents use their own matching document icon:
+
+![MacBasic document icon](Resources/MacBasicDocumentIcon.png)
+
+## Manual
+
+The complete user guide and alphabetical language reference are available in
+editable and print-ready formats:
+
+- `Documentation/MacBasic-Users-Guide.docx`
+- `Documentation/MacBasic-Users-Guide.pdf`
+
 ```basic
 SUB Greet(name$)
   PRINT "Hello, " + name$
@@ -62,8 +74,15 @@ Run a script without opening the editor:
 
 ## Language
 
-- Variables are dynamically typed. Names ending in `$` conventionally hold text.
-- Amiga type suffixes `$`, `%`, `&`, `!`, and `#` are accepted.
+- Variables without a type declaration remain dynamically typed.
+- Amiga type suffixes `$`, `%`, `&`, `!`, and `#` select string, integer,
+  long-integer, single-style numeric, and double-style numeric values.
+- `DEFINT`, `DEFLNG`, `DEFSNG`, `DEFDBL`, and `DEFSTR` set the default type
+  for unsuffixed names by initial letter or letter range, for example
+  `DEFINT A-C, I`. Explicit suffixes override these declarations.
+- Default types apply to scalar assignments, arrays, `READ` and `INPUT`,
+  `FOR` variables, procedure parameters, and function results. Integer
+  assignments are rounded to the nearest integer.
 - Operators: `+ - * / \ ^ MOD`, comparisons, `AND`, `OR`, `XOR`, `EQV`,
   `IMP`, and `NOT`.
 - Blocks: `IF ... THEN` / `ELSE` / `END IF`, `WHILE` / `WEND`,

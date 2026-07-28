@@ -15,10 +15,15 @@ static NSString *MBString(id v) {
     }
     return [v description];
 }
-static id MBCoerce(NSString *name,id value) {
-    if([name hasSuffix:@"$"])return MBString(value);
-    if([name hasSuffix:@"%"]||[name hasSuffix:@"&"])return @([value integerValue]);
-    if([name hasSuffix:@"!"]||[name hasSuffix:@"#"])return @([value doubleValue]);
+static NSString *MBExplicitType(NSString *name) {
+    if(!name.length)return nil;
+    NSString *last=[name substringFromIndex:name.length-1];
+    return [@"$%&!#" containsString:last]?last:nil;
+}
+static id MBCoerceAs(NSString *type,id value) {
+    if([type isEqual:@"$"])return MBString(value);
+    if([type isEqual:@"%"]||[type isEqual:@"&"])return @(llround([value doubleValue]));
+    if([type isEqual:@"!"]||[type isEqual:@"#"])return @([value doubleValue]);
     return value?:@0;
 }
 static NSString *MBByteString(const void *bytes,NSUInteger length) {
@@ -28,6 +33,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @interface MBArray : NSObject
 @property NSArray<NSNumber *> *dimensions;
 @property NSInteger lowerBound;
+@property NSString *elementType;
 @property NSMutableDictionary<NSString *, id> *values;
 - (id)valueAt:(NSArray *)indices;
 - (void)setValue:(id)value at:(NSArray *)indices;
@@ -42,8 +48,8 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         [parts addObject:[NSString stringWithFormat:@"%ld",(long)n]];}
     return [parts componentsJoinedByString:@","];
 }
-- (id)valueAt:(NSArray *)indices {NSString *k=[self key:indices];return k?(self.values[k]?:@0):@0;}
-- (void)setValue:(id)value at:(NSArray *)indices {NSString *k=[self key:indices];if(k)self.values[k]=value?:@0;}
+- (id)valueAt:(NSArray *)indices {NSString *k=[self key:indices];id defaultValue=[self.elementType isEqual:@"$"]?@"":@0;return k?(self.values[k]?:defaultValue):defaultValue;}
+- (void)setValue:(id)value at:(NSArray *)indices {NSString *k=[self key:indices];if(k)self.values[k]=MBCoerceAs(self.elementType,value);}
 @end
 
 @interface MBFile : NSObject
@@ -85,8 +91,11 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @property NSUInteger faultLine;
 @property NSNumber *resumeTarget;
 @property NSMutableDictionary<NSNumber *, NSMutableDictionary *> *objects;
+@property NSMutableDictionary<NSString *, NSString *> *defaultTypes;
 - (id)evaluate:(NSString *)text variables:(NSMutableDictionary *)vars;
 - (id)call:(NSString *)name args:(NSArray *)args variables:(NSMutableDictionary *)caller error:(NSError **)error;
+- (id)coerceValue:(id)value forName:(NSString *)name;
+- (id)defaultValueForName:(NSString *)name;
 @end
 
 @implementation MBExpr
@@ -142,7 +151,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
     }
     if([@[@"DATE$",@"TIME$",@"TIMER",@"RND",@"INKEY$"] containsObject:[t uppercaseString]])
         return [self.owner call:t args:@[] variables:self.vars error:nil]?:@0;
-    return self.vars[[t uppercaseString]] ?: ([t hasSuffix:@"$"] ? @"" : @0);
+    return self.vars[[t uppercaseString]] ?: [self.owner defaultValueForName:t];
 }
 - (id)power {
     id v=[self primary];if([self take:@"^"])v=@(pow([v doubleValue],[[self power]doubleValue]));return v;
@@ -194,6 +203,14 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform {
     if ((self=[super init])) { _platform=platform; _procedures=[NSMutableDictionary dictionary]; } return self;
 }
+- (NSString *)typeForName:(NSString *)name {
+    NSString *upper=[name uppercaseString];NSString *explicit=MBExplicitType(upper);if(explicit)return explicit;
+    if(!upper.length)return nil;unichar first=[upper characterAtIndex:0];
+    if(first>='A'&&first<='Z')return self.defaultTypes[[NSString stringWithFormat:@"%C",first]];
+    return nil;
+}
+- (id)coerceValue:(id)value forName:(NSString *)name {return MBCoerceAs([self typeForName:name],value);}
+- (id)defaultValueForName:(NSString *)name {return [[[self typeForName:name] description] isEqual:@"$"] ? @"" : @0;}
 - (NSError *)err:(NSString *)message line:(NSUInteger)line {
     return [NSError errorWithDomain:@"MacBasic" code:1 userInfo:@{NSLocalizedDescriptionKey:
         [NSString stringWithFormat:@"Line %lu: %@",(unsigned long)line+1,message]}];
@@ -288,7 +305,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
                 NSArray *bounds=[self parts:[decl substringWithRange:NSMakeRange(par.location+1,decl.length-par.location-2)]];
                 NSMutableArray *dims=[NSMutableArray array];
                 for(NSString *b in bounds)[dims addObject:@([[self evaluate:b variables:vars]integerValue])];
-                MBArray *array=[MBArray new];array.lowerBound=self.optionBase;array.dimensions=dims;vars[name]=array;
+                MBArray *array=[MBArray new];array.lowerBound=self.optionBase;array.dimensions=dims;array.elementType=[self typeForName:name];vars[name]=array;
             }continue;
         }
         if([u hasPrefix:@"ERASE "]){
@@ -298,7 +315,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         if([u hasPrefix:@"READ "]){
             for(NSString *item in [self parts:[raw substringFromIndex:5]]){
                 if(self.dataIndex>=self.dataItems.count){if(error)*error=[self err:@"Out of DATA" line:pc];return NO;}
-                NSString *name=[item uppercaseString];vars[name]=MBCoerce(name,self.dataItems[self.dataIndex++]);
+                NSString *name=[item uppercaseString];vars[name]=[self coerceValue:self.dataItems[self.dataIndex++] forName:name];
             }
             continue;
         }
@@ -369,7 +386,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
                 for(NSDictionary *field in file.fields){NSUInteger length=[field[@"length"]unsignedIntegerValue];NSData *bytes=[MBString(vars[field[@"name"]])dataUsingEncoding:NSISOLatin1StringEncoding];
                     NSMutableData *padded=[NSMutableData dataWithLength:length];memcpy(padded.mutableBytes,bytes.bytes,MIN(length,bytes.length));memcpy((uint8_t *)file.randomData.mutableBytes+position,padded.bytes,length);position+=length;}}
             else {NSUInteger position=offset;for(NSDictionary *field in file.fields){NSUInteger length=[field[@"length"]unsignedIntegerValue];
-                    if(position+length<=file.randomData.length)vars[field[@"name"]]=MBByteString((uint8_t *)file.randomData.bytes+position,length);position+=length;}}
+                    if(position+length<=file.randomData.length){NSString *name=field[@"name"];vars[name]=[self coerceValue:MBByteString((uint8_t *)file.randomData.bytes+position,length) forName:name];}position+=length;}}
             file.index=record;continue;
         }
         if([u hasPrefix:@"PRINT #"]||[u hasPrefix:@"WRITE #"]){
@@ -388,7 +405,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             NSString *line=file.lines[file.index++];NSArray *values=lineInput?@[line]:[self parts:line];NSArray *names=[self parts:[raw substringFromIndex:comma.location+1]];
             for(NSUInteger i=0;i<names.count;i++){NSString *name=[names[i]uppercaseString],*v=i<values.count?MBTrim(values[i]):@"";
                 if([v hasPrefix:@"\""]&&[v hasSuffix:@"\""]&&v.length>=2)v=[v substringWithRange:NSMakeRange(1,v.length-2)];
-                vars[name]=MBCoerce(name,[name hasSuffix:@"$"]?v:@([v doubleValue]));}continue;
+                id input=[[self typeForName:name]isEqual:@"$"]?v:@([v doubleValue]);vars[name]=[self coerceValue:input forName:name];}continue;
         }
         if([u hasPrefix:@"INPUT "]||[u hasPrefix:@"LINE INPUT "]){
             BOOL lineInput=[u hasPrefix:@"LINE INPUT "];NSString *tail=[raw substringFromIndex:lineInput?11:6];NSString *prompt=@"? ";
@@ -397,7 +414,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
                     if([tail hasPrefix:@";"]||[tail hasPrefix:@","])tail=MBTrim([tail substringFromIndex:1]);}}
             NSString *answer=MBTrim([self.platform readInput:prompt]);NSArray *values=lineInput?@[answer]:[self parts:answer];
             NSArray *names=[self parts:tail];for(NSUInteger i=0;i<names.count;i++){NSString *name=[names[i]uppercaseString];NSString *value=i<values.count?values[i]:@"";
-                vars[name]=MBCoerce(name,[name hasSuffix:@"$"]?value:@([value doubleValue]));}continue;
+                id input=[[self typeForName:name]isEqual:@"$"]?value:@([value doubleValue]);vars[name]=[self coerceValue:input forName:name];}continue;
         }
         if([u hasPrefix:@"PRINT"]){
             NSString *tail=raw.length>5?MBTrim([raw substringFromIndex:5]):@"";BOOL newline=YES;
@@ -454,14 +471,14 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             NSTextCheckingResult *m=[re firstMatchInString:raw options:0 range:NSMakeRange(0,raw.length)];
             if(!m){if(error)*error=[self err:@"Malformed FOR" line:pc];return NO;}
             NSString *name=[[raw substringWithRange:[m rangeAtIndex:1]] uppercaseString];
-            if(!loops[@(pc)]) vars[name]=[self evaluate:[raw substringWithRange:[m rangeAtIndex:2]] variables:vars];
+            if(!loops[@(pc)]) vars[name]=[self coerceValue:[self evaluate:[raw substringWithRange:[m rangeAtIndex:2]] variables:vars] forName:name];
             double limit=[[self evaluate:[raw substringWithRange:[m rangeAtIndex:3]] variables:vars] doubleValue];
             double step=[m rangeAtIndex:4].location==NSNotFound?1:[[self evaluate:[raw substringWithRange:[m rangeAtIndex:4]] variables:vars] doubleValue];
             loops[@(pc)]=@{@"name":name,@"limit":@(limit),@"step":@(step)}; continue;
         }
         if([u hasPrefix:@"NEXT"]){
             NSUInteger f=pc; while(f>start&&!loops[@(f)])f--; NSDictionary *loop=loops[@(f)];
-            if(loop){NSString *n=loop[@"name"];double val=[vars[n]doubleValue]+[loop[@"step"]doubleValue];vars[n]=@(val);
+            if(loop){NSString *n=loop[@"name"];double val=[vars[n]doubleValue]+[loop[@"step"]doubleValue];vars[n]=[self coerceValue:@(val) forName:n];val=[vars[n]doubleValue];
                 double step=[loop[@"step"]doubleValue],lim=[loop[@"limit"]doubleValue];if((step>=0&&val<=lim)||(step<0&&val>=lim))pc=f-1;else[loops removeObjectForKey:@(f)];} continue;
         }
         if([u isEqual:@"EXIT FOR"]){NSUInteger depth=0;for(NSUInteger i=pc+1;i<end;i++){NSString *q=[MBTrim(self.lines[i])uppercaseString];if([q hasPrefix:@"FOR "])depth++;if([q hasPrefix:@"NEXT"]){if(depth==0){pc=i;break;}depth--;}}continue;}
@@ -623,7 +640,22 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         }
         if([u isEqual:@"SYSTEM"]||[u isEqual:@"NEW"])return YES;
         if([u isEqual:@"CLEAR"]){[vars removeAllObjects];continue;}
-        if([u hasPrefix:@"DEFINT "]||[u hasPrefix:@"DEFLNG "]||[u hasPrefix:@"DEFSNG "]||[u hasPrefix:@"DEFDBL "]||[u hasPrefix:@"DEFSTR "])continue;
+        if([u hasPrefix:@"DEFINT "]||[u hasPrefix:@"DEFLNG "]||[u hasPrefix:@"DEFSNG "]||[u hasPrefix:@"DEFDBL "]||[u hasPrefix:@"DEFSTR "]){
+            NSString *type=[u hasPrefix:@"DEFINT "]?@"%":([u hasPrefix:@"DEFLNG "]?@"&":([u hasPrefix:@"DEFSNG "]?@"!":([u hasPrefix:@"DEFDBL "]?@"#":@"$")));
+            NSRange firstSpace=[raw rangeOfString:@" "];NSString *ranges=MBTrim([raw substringFromIndex:NSMaxRange(firstSpace)]);
+            for(NSString *item in [self parts:ranges]){
+                NSString *range=[[MBTrim(item)uppercaseString]copy];NSArray *ends=[range componentsSeparatedByString:@"-"];
+                if((ends.count!=1&&ends.count!=2)||[ends[0]length]!=1||(ends.count==2&&[ends[1]length]!=1)){
+                    if(error)*error=[self err:@"DEF type ranges must use letters such as A-Z or Q" line:pc];return NO;
+                }
+                unichar first=[ends[0]characterAtIndex:0],last=ends.count==2?[ends[1]characterAtIndex:0]:first;
+                if(first<'A'||first>'Z'||last<'A'||last>'Z'||first>last){
+                    if(error)*error=[self err:@"Invalid DEF type letter range" line:pc];return NO;
+                }
+                for(unichar letter=first;letter<=last;letter++)self.defaultTypes[[NSString stringWithFormat:@"%C",letter]]=type;
+            }
+            continue;
+        }
         if([u hasPrefix:@"CHDIR "]){
             NSString *path=MBString([self evaluate:[raw substringFromIndex:6]variables:vars]);
             if(![[NSFileManager defaultManager]changeCurrentDirectoryPath:path]&&error){*error=[self err:@"Unable to change directory" line:pc];return NO;}continue;
@@ -679,7 +711,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
                     NSString *s=MBString(value);if(s.length>width)s=[s substringToIndex:width];
                     NSUInteger pad=width-s.length;NSString *spaces=[@"" stringByPaddingToLength:pad withString:@" " startingAtIndex:0];
                     value=rightSet?[spaces stringByAppendingString:s]:[s stringByAppendingString:spaces];}
-                vars[name]=MBCoerce(name,value);}
+                vars[name]=[self coerceValue:value forName:name];}
             continue;
         }
         NSRange par=[raw rangeOfString:@"("]; NSString *name; NSArray *argTexts;
@@ -772,10 +804,10 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
     if([key isEqual:@"VARPTR"]||[key isEqual:@"SADD"])return @((NSUInteger)(__bridge void *)args.firstObject);
     NSDictionary *p=self.procedures[key]; if(!p){if(error)*error=[self err:[NSString stringWithFormat:@"Unknown statement or procedure '%@'",name] line:0];return nil;}
     NSMutableDictionary *local=[caller mutableCopy]; NSArray *params=p[@"params"];
-    for(NSUInteger i=0;i<params.count;i++)local[[params[i] uppercaseString]]=i<args.count?args[i]:@0;
+    for(NSUInteger i=0;i<params.count;i++){NSString *paramName=[params[i] uppercaseString];local[paramName]=[self coerceValue:(i<args.count?args[i]:@0) forName:paramName];}
     id value=@0;BOOL returned=NO;
     [self executeFrom:[p[@"start"] unsignedIntegerValue] to:[p[@"end"] unsignedIntegerValue] variables:local result:&value returned:&returned error:error];
-    return value;
+    return [self coerceValue:value forName:key];
 }
 - (BOOL)runSource:(NSString *)source error:(NSError **)error {
     self.stopped=NO;self.labelLines=[NSMutableDictionary dictionary];NSMutableArray *prepared=[NSMutableArray array];
@@ -789,7 +821,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         [prepared addObject:line];
     }
     self.lines=prepared;
-    [self.procedures removeAllObjects];self.dataItems=[NSMutableArray array];self.dataLabels=[NSMutableDictionary dictionary];self.dataIndex=0;self.optionBase=0;self.files=[NSMutableDictionary dictionary];self.areaPoints=[NSMutableArray array];self.waveforms=[NSMutableDictionary dictionary];self.memory=[NSMutableDictionary dictionary];self.objects=[NSMutableDictionary dictionary];self.errorHandlerLine=nil;self.resumeTarget=nil;
+    [self.procedures removeAllObjects];self.dataItems=[NSMutableArray array];self.dataLabels=[NSMutableDictionary dictionary];self.dataIndex=0;self.optionBase=0;self.defaultTypes=[NSMutableDictionary dictionary];self.files=[NSMutableDictionary dictionary];self.areaPoints=[NSMutableArray array];self.waveforms=[NSMutableDictionary dictionary];self.memory=[NSMutableDictionary dictionary];self.objects=[NSMutableDictionary dictionary];self.errorHandlerLine=nil;self.resumeTarget=nil;
     NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"(?i)^(SUB|FUNCTION)\\s+([A-Z_$][A-Z0-9_$]*)\\s*(?:\\((.*)\\))?$" options:0 error:nil];
     for(NSUInteger i=0;i<self.lines.count;i++){NSString *s=MBTrim(self.lines[i]);NSTextCheckingResult *m=[re firstMatchInString:s options:0 range:NSMakeRange(0,s.length)];if(!m)continue;
         NSString *name=[[s substringWithRange:[m rangeAtIndex:2]]uppercaseString];NSString *params=[m rangeAtIndex:3].location==NSNotFound?@"":[s substringWithRange:[m rangeAtIndex:3]];

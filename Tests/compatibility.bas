@@ -1,3 +1,7 @@
+FUNCTION CountValue(count)
+RETURN count
+END FUNCTION
+
 OPEN "Tests/macbasic-io-test.tmp" FOR OUTPUT AS #1
 WRITE #1, "Ada", 42
 CLOSE #1
@@ -25,6 +29,30 @@ CLOSE #2
 KILL "Tests/macbasic-random-test.tmp"
 PRINT code$; ":"; CVI(number$)
 PRINT USING "##.##"; 3.5
+
+DEFINT A-C, I
+apple = 3.8
+banana = 2.2
+decimal = 3.8
+amount$ = 99
+PRINT apple, banana, decimal
+PRINT amount$; " bottles"
+PRINT CountValue(4.7)
+
+DEFSTR N
+name = 42
+DIM integerArray(2), nameArray(1)
+integerArray(1) = 8.7
+nameArray(0) = 123
+PRINT name; ":"; integerArray(1); ":"; nameArray(0)
+
+DEFLNG L
+DEFSNG S
+DEFDBL D
+longCount = 2.6
+singleValue = 2.6
+doubleValue = 7
+PRINT longCount, singleValue, doubleValue / 2
 
 OBJECT.X(1) = 10
 OBJECT.Y(1) = 10

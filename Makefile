@@ -22,7 +22,7 @@ app: $(BUILD)/$(APP)
 	mkdir -p $(BUILD)/$(APP).app/Contents/MacOS $(BUILD)/$(APP).app/Contents/Resources
 	cp $(BUILD)/$(APP) $(BUILD)/$(APP).app/Contents/MacOS/
 	cp Resources/Info.plist $(BUILD)/$(APP).app/Contents/
-	cp Resources/MacBasic.icns Resources/MacBasicIcon.png $(BUILD)/$(APP).app/Contents/Resources/
+	cp Resources/MacBasic.icns Resources/MacBasicIcon.png Resources/MacBasicDocument.icns Resources/MacBasicDocumentIcon.png $(BUILD)/$(APP).app/Contents/Resources/
 	cp Examples/Welcome.bas Examples/Drawing.bas $(BUILD)/$(APP).app/Contents/Resources/
 
 test: $(BUILD)/$(APP)
