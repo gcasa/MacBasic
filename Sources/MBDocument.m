@@ -67,19 +67,21 @@ static NSColor *MBColor(id value) {
 @property NSTextView *editor;
 @property NSTextView *output;
 @property MBInterpreter *interpreter;
-@property NSMutableArray<NSWindow *> *basicWindows;
-@property NSMutableDictionary<NSString *, MBCanvasView *> *canvasViews;
-@property NSString *activeCanvasName;
+@property NSMutableDictionary<NSNumber *, NSWindow *> *basicWindows;
+@property NSMutableDictionary<NSNumber *, MBCanvasView *> *canvasViews;
+@property NSInteger activeCanvasID;
 @property NSMutableArray<NSSound *> *playingSounds;
 @property NSInteger lastMenu;
 @property NSInteger lastMenuItem;
 @property NSString *sourceBeforeWindow;
+@property BOOL programRunning;
+@property BOOL closingDocument;
 @end
 
 @implementation MBDocument
 - (instancetype)init {
     if ((self=[super init])) {
-        _basicWindows=[NSMutableArray array];
+        _basicWindows=[NSMutableDictionary dictionary];
         _canvasViews=[NSMutableDictionary dictionary];
         _playingSounds=[NSMutableArray array];
         _sourceBeforeWindow=@"' Welcome to MacBasic\n"
@@ -93,15 +95,15 @@ static NSColor *MBColor(id value) {
             "FOR i = 1 TO 5\n"
             "  PRINT i, Square(i)\n"
             "NEXT i\n\n"
-            "' Create a window and draw into a named canvas view\n"
-            "WINDOW OPEN \"MacBasic Drawing\", 640, 420, 160, 140\n"
-            "VIEW ADD \"canvas\", \"MacBasic Drawing\", 20, 20, 600, 360\n"
-            "CLEAR \"canvas\", \"#F5F3FF\"\n"
-            "DRAW RECT \"canvas\", 30, 30, 540, 300, \"#4F46E5\", 0\n"
-            "DRAW OVAL \"canvas\", 70, 80, 160, 160, \"#06B6D4\", 1\n"
-            "DRAW OVAL \"canvas\", 370, 80, 160, 160, \"#EC4899\", 1\n"
-            "DRAW LINE \"canvas\", 230, 160, 370, 160, \"#111827\"\n"
-            "DRAW TEXT \"canvas\", \"MacBasic Graphics\", 205, 280, \"#312E81\"\n";
+            "' Create window 1 and draw into view 10\n"
+            "WINDOW OPEN 1, \"MacBasic Drawing\", 640, 420, 160, 140\n"
+            "VIEW ADD 10, 1, 20, 20, 600, 360\n"
+            "CLEAR 10, \"#F5F3FF\"\n"
+            "DRAW RECT 10, 30, 30, 540, 300, \"#4F46E5\", 0\n"
+            "DRAW OVAL 10, 70, 80, 160, 160, \"#06B6D4\", 1\n"
+            "DRAW OVAL 10, 370, 80, 160, 160, \"#EC4899\", 1\n"
+            "DRAW LINE 10, 230, 160, 370, 160, \"#111827\"\n"
+            "DRAW TEXT 10, \"MacBasic Graphics\", 205, 280, \"#312E81\"\n";
     }
     return self;
 }
@@ -130,6 +132,10 @@ static NSColor *MBColor(id value) {
     NSWindow *window=[[NSWindow alloc]initWithContentRect:NSMakeRect(100,100,900,650)
         styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
+    [window setReleasedWhenClosed:NO];
+#if !defined(GNUSTEP)
+    window.animationBehavior=NSWindowAnimationBehaviorNone;
+#endif
     window.minSize=NSMakeSize(600,420);
     NSTextView *editorText=nil,*outputText=nil;
     NSScrollView *editor=[self scrollWithText:&editorText frame:NSMakeRect(10,205,880,435) editable:YES];
@@ -189,6 +195,8 @@ static NSColor *MBColor(id value) {
     [storage endEditing];
 }
 - (void)run:(id)sender {
+    if(self.programRunning){[self writeText:@"A program is already running. Stop it before running again.\n"];return;}
+    self.programRunning=YES;
     self.output.string=@"";self.interpreter=[[MBInterpreter alloc]initWithPlatform:self];
     NSString *source=[self.editor.string copy];
     [NSThread detachNewThreadSelector:@selector(runSourceInBackground:) toTarget:self withObject:source];
@@ -198,8 +206,10 @@ static NSColor *MBColor(id value) {
         NSError *error=nil;BOOL ok=[self.interpreter runSource:source error:&error];
         if(!ok&&error)[self writeText:[NSString stringWithFormat:@"Error: %@\n",error.localizedDescription]];
         else if(!self.interpreter.stopped)[self writeText:@"Program finished.\n"];
+        [self performSelectorOnMainThread:@selector(programDidFinish) withObject:nil waitUntilDone:NO];
     }
 }
+- (void)programDidFinish {self.programRunning=NO;}
 - (void)stop:(id)sender {self.interpreter.stopped=YES;[self writeText:@"Program stopped.\n"];}
 - (void)appendOutput:(NSString *)text {
     [self.output.textStorage appendAttributedString:[[NSAttributedString alloc]initWithString:text
@@ -224,50 +234,69 @@ static NSColor *MBColor(id value) {
     return request[@"value"]?:@"";
 }
 - (void)createBasicWindow:(NSDictionary *)spec {
+    if(self.closingDocument)return;
     CGFloat width=[spec[@"width"]doubleValue],height=[spec[@"height"]doubleValue];
+    NSWindow *existing=self.basicWindows[spec[@"id"]];
+    if(existing){for(NSNumber *viewID in [self.canvasViews.allKeys copy])if(self.canvasViews[viewID].window==existing)[self.canvasViews removeObjectForKey:viewID];[existing orderOut:nil];[existing close];}
     NSRect frame=NSMakeRect(160,160,width,height);
     if([spec[@"positioned"]boolValue])frame.origin=NSMakePoint([spec[@"x"]doubleValue],[spec[@"y"]doubleValue]);
     NSWindow *w=[[NSWindow alloc]initWithContentRect:frame
         styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
+    [w setReleasedWhenClosed:NO];
+#if !defined(GNUSTEP)
+    w.animationBehavior=NSWindowAnimationBehaviorNone;
+#endif
     w.title=spec[@"title"];NSTextField *label=[[NSTextField alloc]initWithFrame:NSMakeRect(20,height/2-15,width-40,30)];
     label.stringValue=w.title;label.alignment=NSTextAlignmentCenter;label.editable=NO;label.bezeled=NO;label.drawsBackground=NO;
-    [w.contentView addSubview:label];[self.basicWindows addObject:w];[w makeKeyAndOrderFront:nil];
+    [w.contentView addSubview:label];self.basicWindows[spec[@"id"]]=w;[w makeKeyAndOrderFront:nil];
 }
-- (void)openWindowWithTitle:(NSString *)title width:(CGFloat)width height:(CGFloat)height x:(CGFloat)x y:(CGFloat)y {
-    NSDictionary *spec=@{@"title":title,@"width":@(width),@"height":@(height),
+- (void)openWindowWithID:(NSInteger)windowID title:(NSString *)title width:(CGFloat)width height:(CGFloat)height x:(CGFloat)x y:(CGFloat)y {
+    NSDictionary *spec=@{@"id":@(windowID),@"title":title,@"width":@(width),@"height":@(height),
         @"x":@(isnan(x)?0:x),@"y":@(isnan(y)?0:y),@"positioned":@(!isnan(x)&&!isnan(y))};
     [self performSelectorOnMainThread:@selector(createBasicWindow:) withObject:spec waitUntilDone:YES];
 }
-- (void)closeBasicWindow:(NSString *)title {
-    for(NSWindow *w in [self.basicWindows copy])if([w.title isEqual:title]){[w close];[self.basicWindows removeObject:w];}
+- (void)closeBasicWindow:(NSNumber *)windowID {
+    NSWindow *window=self.basicWindows[windowID];if(window){
+        for(NSNumber *viewID in [self.canvasViews.allKeys copy])if(self.canvasViews[viewID].window==window)[self.canvasViews removeObjectForKey:viewID];
+        [window orderOut:nil];[window close];[self.basicWindows removeObjectForKey:windowID];}
 }
-- (void)closeWindowWithTitle:(NSString *)title {
-    [self performSelectorOnMainThread:@selector(closeBasicWindow:) withObject:title waitUntilDone:NO];
+- (void)closeWindowWithID:(NSInteger)windowID {
+    [self performSelectorOnMainThread:@selector(closeBasicWindow:) withObject:@(windowID) waitUntilDone:NO];
 }
 - (void)createCanvas:(NSDictionary *)spec {
-    NSWindow *target=nil;for(NSWindow *w in self.basicWindows)if([w.title isEqual:spec[@"window"]]){target=w;break;}
-    if(!target){[self appendOutput:[NSString stringWithFormat:@"Drawing error: window '%@' not found.\n",spec[@"window"]]];return;}
+    if(self.closingDocument)return;
+    NSWindow *target=self.basicWindows[spec[@"windowID"]];
+    if(!target){[self appendOutput:[NSString stringWithFormat:@"Drawing error: window ID %@ not found.\n",spec[@"windowID"]]];return;}
     MBCanvasView *canvas=[[MBCanvasView alloc]initWithFrame:NSMakeRect([spec[@"x"]doubleValue],[spec[@"y"]doubleValue],
         [spec[@"width"]doubleValue],[spec[@"height"]doubleValue])];
+    [self.canvasViews[spec[@"viewID"]]removeFromSuperview];
     canvas.autoresizingMask=NSViewMaxXMargin|NSViewMaxYMargin;
-    [target.contentView addSubview:canvas];self.canvasViews[[spec[@"name"]uppercaseString]]=canvas;
-    self.activeCanvasName=[spec[@"name"]uppercaseString];
+    [target.contentView addSubview:canvas];self.canvasViews[spec[@"viewID"]]=canvas;
+    self.activeCanvasID=[spec[@"viewID"]integerValue];
     target.acceptsMouseMovedEvents=YES;[target makeFirstResponder:canvas];
 }
-- (void)addViewNamed:(NSString *)name toWindow:(NSString *)window x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height {
-    NSDictionary *spec=@{@"name":name,@"window":window,@"x":@(x),@"y":@(y),@"width":@(width),@"height":@(height)};
+- (void)addViewWithID:(NSInteger)viewID toWindowID:(NSInteger)windowID x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height {
+    NSDictionary *spec=@{@"viewID":@(viewID),@"windowID":@(windowID),@"x":@(x),@"y":@(y),@"width":@(width),@"height":@(height)};
     [self performSelectorOnMainThread:@selector(createCanvas:) withObject:spec waitUntilDone:YES];
 }
 - (void)applyDrawingCommand:(NSDictionary *)command {
-    NSString *name=[command[@"view"]length]?[command[@"view"]uppercaseString]:self.activeCanvasName;
-    MBCanvasView *canvas=self.canvasViews[name];
-    if(!canvas){[self appendOutput:[NSString stringWithFormat:@"Drawing error: view '%@' not found.\n",command[@"view"]]];return;}
+    NSNumber *viewID=[command[@"viewID"]integerValue]>=0?command[@"viewID"]:@(self.activeCanvasID);
+    MBCanvasView *canvas=self.canvasViews[viewID];
+    if(!canvas){[self appendOutput:[NSString stringWithFormat:@"Drawing error: view ID %@ not found.\n",viewID]];return;}
     [canvas addDrawingCommand:command];
 }
-- (void)drawCommand:(NSString *)command onView:(NSString *)view arguments:(NSArray *)arguments {
-    NSDictionary *spec=@{@"type":command,@"view":view,@"args":arguments};
+- (void)drawCommand:(NSString *)command onViewID:(NSInteger)viewID arguments:(NSArray *)arguments {
+    if(self.closingDocument)return;
+    NSDictionary *spec=@{@"type":command,@"viewID":@(viewID),@"args":arguments};
     [self performSelectorOnMainThread:@selector(applyDrawingCommand:) withObject:spec waitUntilDone:YES];
+}
+- (void)close {
+    self.closingDocument=YES;
+    self.interpreter.stopped=YES;
+    for(NSWindow *window in self.basicWindows.allValues){[window orderOut:nil];[window close];}
+    [self.canvasViews removeAllObjects];[self.basicWindows removeAllObjects];
+    [super close];
 }
 - (void)playSoundOnMainThread:(NSString *)name {
     NSSound *sound=nil;
@@ -322,7 +351,7 @@ static NSColor *MBColor(id value) {
 }
 - (void)performBeep {NSBeep();}
 - (id)inputValue:(NSString *)name argument:(NSInteger)argument {
-    __block id value=@0;MBCanvasView *canvas=self.canvasViews[self.activeCanvasName];
+    __block id value=@0;MBCanvasView *canvas=self.canvasViews[@(self.activeCanvasID)];
     if([[name uppercaseString]isEqual:@"INKEY$"]){value=canvas.lastKey?:@"";canvas.lastKey=@"";}
     else if([[name uppercaseString]isEqual:@"MOUSE"]){if(argument==0)value=@(canvas.mousePressed?-1:0);else if(argument==1)value=@(canvas.mousePosition.x);else value=@(canvas.mousePosition.y);}
     return value;

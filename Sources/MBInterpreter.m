@@ -520,26 +520,32 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             if(result)*result=raw.length>6?[self evaluate:[raw substringFromIndex:6] variables:vars]:@0;if(returned)*returned=YES;return YES;
         }
         if([u hasPrefix:@"WINDOW OPEN "]){
-            NSArray *p=[self parts:[raw substringFromIndex:12]]; if(p.count<3){if(error)*error=[self err:@"WINDOW OPEN needs title, width, height" line:pc];return NO;}
-            if(p.count==4){if(error)*error=[self err:@"WINDOW OPEN coordinates require both x and y" line:pc];return NO;}
-            CGFloat x=p.count>=5?[[self evaluate:p[3] variables:vars]doubleValue]:NAN;
-            CGFloat y=p.count>=5?[[self evaluate:p[4] variables:vars]doubleValue]:NAN;
-            [self.platform openWindowWithTitle:MBString([self evaluate:p[0] variables:vars])
-                                        width:[[self evaluate:p[1] variables:vars]doubleValue]
-                                       height:[[self evaluate:p[2] variables:vars]doubleValue] x:x y:y];continue;
+            NSArray *p=[self parts:[raw substringFromIndex:12]];if(p.count<4){if(error)*error=[self err:@"WINDOW OPEN needs id, title, width, height" line:pc];return NO;}
+            if(p.count==5){if(error)*error=[self err:@"WINDOW OPEN coordinates require both x and y" line:pc];return NO;}
+            if(p.count!=4&&p.count!=6){if(error)*error=[self err:@"WINDOW OPEN accepts id, title, width, height[, x, y]" line:pc];return NO;}
+            NSInteger windowID=[[self evaluate:p[0] variables:vars]integerValue];
+            if(windowID<=0){if(error)*error=[self err:@"WINDOW ID must be a positive integer" line:pc];return NO;}
+            CGFloat x=p.count==6?[[self evaluate:p[4] variables:vars]doubleValue]:NAN;
+            CGFloat y=p.count==6?[[self evaluate:p[5] variables:vars]doubleValue]:NAN;
+            [self.platform openWindowWithID:windowID title:MBString([self evaluate:p[1] variables:vars])
+                                     width:[[self evaluate:p[2] variables:vars]doubleValue]
+                                    height:[[self evaluate:p[3] variables:vars]doubleValue] x:x y:y];continue;
         }
         if([u hasPrefix:@"WINDOW CLOSE "]){
-            [self.platform closeWindowWithTitle:MBString([self evaluate:[raw substringFromIndex:13] variables:vars])];continue;
+            NSInteger windowID=[[self evaluate:[raw substringFromIndex:13] variables:vars]integerValue];
+            if(windowID<=0){if(error)*error=[self err:@"WINDOW ID must be a positive integer" line:pc];return NO;}
+            [self.platform closeWindowWithID:windowID];continue;
         }
         if([u hasPrefix:@"VIEW ADD "]){
             NSArray *p=[self parts:[raw substringFromIndex:9]];
-            if(p.count!=6){if(error)*error=[self err:@"VIEW ADD needs name, window, x, y, width, height" line:pc];return NO;}
-            [self.platform addViewNamed:MBString([self evaluate:p[0] variables:vars])
-                              toWindow:MBString([self evaluate:p[1] variables:vars])
-                                     x:[[self evaluate:p[2] variables:vars]doubleValue]
-                                     y:[[self evaluate:p[3] variables:vars]doubleValue]
-                                 width:[[self evaluate:p[4] variables:vars]doubleValue]
-                                height:[[self evaluate:p[5] variables:vars]doubleValue]];continue;
+            if(p.count!=6){if(error)*error=[self err:@"VIEW ADD needs view id, window id, x, y, width, height" line:pc];return NO;}
+            NSInteger viewID=[[self evaluate:p[0]variables:vars]integerValue],windowID=[[self evaluate:p[1]variables:vars]integerValue];
+            if(viewID<=0||windowID<=0){if(error)*error=[self err:@"VIEW and WINDOW IDs must be positive integers" line:pc];return NO;}
+            [self.platform addViewWithID:viewID toWindowID:windowID
+                                      x:[[self evaluate:p[2] variables:vars]doubleValue]
+                                      y:[[self evaluate:p[3] variables:vars]doubleValue]
+                                  width:[[self evaluate:p[4] variables:vars]doubleValue]
+                                 height:[[self evaluate:p[5] variables:vars]doubleValue]];continue;
         }
         if([u hasPrefix:@"COLOR "]){
             vars[@"__COLOR"]=MBString([self evaluate:[raw substringFromIndex:6] variables:vars]);continue;
@@ -549,14 +555,14 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             tail=[[tail stringByReplacingOccurrencesOfString:@"(" withString:@""]stringByReplacingOccurrencesOfString:@")" withString:@""];
             NSArray *p=[self parts:tail];if(p.count<2){if(error)*error=[self err:@"PSET needs x and y" line:pc];return NO;}
             NSString *color=p.count>2?MBString([self evaluate:p[2] variables:vars]):(preset?@"white":(vars[@"__COLOR"]?:@"black"));
-            [self.platform drawCommand:@"RECT" onView:@"" arguments:@[[self evaluate:p[0] variables:vars],[self evaluate:p[1] variables:vars],@1,@1,color,@1]];continue;
+            [self.platform drawCommand:@"RECT" onViewID:-1 arguments:@[[self evaluate:p[0] variables:vars],[self evaluate:p[1] variables:vars],@1,@1,color,@1]];continue;
         }
         if([u hasPrefix:@"CIRCLE "]){
             NSString *tail=[[[raw substringFromIndex:7]stringByReplacingOccurrencesOfString:@"(" withString:@""]stringByReplacingOccurrencesOfString:@")" withString:@""];
             NSArray *p=[self parts:tail];if(p.count<3){if(error)*error=[self err:@"CIRCLE needs x, y, radius" line:pc];return NO;}
             double x=[[self evaluate:p[0] variables:vars]doubleValue],y=[[self evaluate:p[1] variables:vars]doubleValue],r=[[self evaluate:p[2] variables:vars]doubleValue];
             NSString *color=p.count>3?MBString([self evaluate:p[3] variables:vars]):(vars[@"__COLOR"]?:@"black");
-            [self.platform drawCommand:@"OVAL" onView:@"" arguments:@[@(x-r),@(y-r),@(r*2),@(r*2),color,@0]];continue;
+            [self.platform drawCommand:@"OVAL" onViewID:-1 arguments:@[@(x-r),@(y-r),@(r*2),@(r*2),color,@0]];continue;
         }
         if([u hasPrefix:@"LINE "]&&[raw containsString:@"-"]){
             NSRegularExpression *r=[NSRegularExpression regularExpressionWithPattern:@"(?i)^LINE\\s*\\((.*?),(.*?)\\)\\s*-\\s*\\((.*?),(.*?)\\)(?:\\s*,\\s*([^,]+))?(?:\\s*,\\s*(B|BF))?$" options:0 error:nil];
@@ -566,8 +572,8 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             NSString *color=[m rangeAtIndex:5].location==NSNotFound?(vars[@"__COLOR"]?:@"black"):MBString([self evaluate:[raw substringWithRange:[m rangeAtIndex:5]] variables:vars]);
             NSString *mode=[m rangeAtIndex:6].location==NSNotFound?@"":[[raw substringWithRange:[m rangeAtIndex:6]]uppercaseString];
             if(mode.length){double x1=[a[0]doubleValue],y1=[a[1]doubleValue],x2=[a[2]doubleValue],y2=[a[3]doubleValue];
-                [self.platform drawCommand:@"RECT" onView:@"" arguments:@[@(MIN(x1,x2)),@(MIN(y1,y2)),@(fabs(x2-x1)),@(fabs(y2-y1)),color,@([mode isEqual:@"BF"])]];}
-            else {[a addObject:color];[self.platform drawCommand:@"LINE" onView:@"" arguments:a];}continue;
+                [self.platform drawCommand:@"RECT" onViewID:-1 arguments:@[@(MIN(x1,x2)),@(MIN(y1,y2)),@(fabs(x2-x1)),@(fabs(y2-y1)),color,@([mode isEqual:@"BF"])]];}
+            else {[a addObject:color];[self.platform drawCommand:@"LINE" onViewID:-1 arguments:a];}continue;
         }
         if([u hasPrefix:@"AREA "]){
             NSString *tail=[[[raw substringFromIndex:5]stringByReplacingOccurrencesOfString:@"(" withString:@""]stringByReplacingOccurrencesOfString:@")" withString:@""];
@@ -575,28 +581,30 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         }
         if([u hasPrefix:@"AREAFILL"]){
             NSString *color=raw.length>8?MBString([self evaluate:[raw substringFromIndex:8] variables:vars]):(vars[@"__COLOR"]?:@"black");
-            NSMutableArray *a=[self.areaPoints mutableCopy];[a addObject:color];[self.platform drawCommand:@"POLYGON" onView:@"" arguments:a];[self.areaPoints removeAllObjects];continue;
+            NSMutableArray *a=[self.areaPoints mutableCopy];[a addObject:color];[self.platform drawCommand:@"POLYGON" onViewID:-1 arguments:a];[self.areaPoints removeAllObjects];continue;
         }
         if([u hasPrefix:@"PAINT "]){
             NSString *tail=[[[raw substringFromIndex:6]stringByReplacingOccurrencesOfString:@"(" withString:@""]stringByReplacingOccurrencesOfString:@")" withString:@""];
             NSArray *p=[self parts:tail];if(p.count>=2){NSString *color=p.count>2?MBString([self evaluate:p[2]variables:vars]):(vars[@"__COLOR"]?:@"black");
-                [self.platform drawCommand:@"PAINT" onView:@"" arguments:@[[self evaluate:p[0]variables:vars],[self evaluate:p[1]variables:vars],color]];}continue;
+                [self.platform drawCommand:@"PAINT" onViewID:-1 arguments:@[[self evaluate:p[0]variables:vars],[self evaluate:p[1]variables:vars],color]];}continue;
         }
         if([u hasPrefix:@"PALETTE "]||[u hasPrefix:@"PATTERN "]||[u hasPrefix:@"WIDTH "]||[u hasPrefix:@"SCROLL "])continue;
         if([u hasPrefix:@"SCREEN "]){
-            NSArray *p=[self parts:[raw substringFromIndex:7]];if(p.count>=3){NSString *title=[NSString stringWithFormat:@"Screen %@",MBString([self evaluate:p[0]variables:vars])];
+            NSArray *p=[self parts:[raw substringFromIndex:7]];if(p.count>=3){NSInteger screenID=[[self evaluate:p[0]variables:vars]integerValue];NSString *title=[NSString stringWithFormat:@"Screen %ld",(long)screenID];
+                if(screenID<=0){if(error)*error=[self err:@"SCREEN ID must be a positive integer" line:pc];return NO;}
                 CGFloat width=[[self evaluate:p[1]variables:vars]doubleValue],height=[[self evaluate:p[2]variables:vars]doubleValue];
-                [self.platform openWindowWithTitle:title width:width height:height x:NAN y:NAN];
-                [self.platform addViewNamed:title toWindow:title x:0 y:0 width:width height:height];}continue;
+                [self.platform openWindowWithID:screenID title:title width:width height:height x:NAN y:NAN];
+                [self.platform addViewWithID:screenID toWindowID:screenID x:0 y:0 width:width height:height];}continue;
         }
         if([u hasPrefix:@"DRAW "]||[u hasPrefix:@"CLEAR "]){
             BOOL clear=[u hasPrefix:@"CLEAR "];NSString *tail=[raw substringFromIndex:clear?6:5];
             NSRange space=[tail rangeOfString:@" "];NSString *command=clear?@"CLEAR":[[space.location==NSNotFound?tail:[tail substringToIndex:space.location] uppercaseString] copy];
             NSString *argText=clear?tail:(space.location==NSNotFound?@"":[tail substringFromIndex:space.location+1]);
-            NSArray *p=[self parts:argText];if(!p.count){if(error)*error=[self err:@"Drawing command needs a view name" line:pc];return NO;}
-            NSString *view=MBString([self evaluate:p[0] variables:vars]);NSMutableArray *args=[NSMutableArray array];
+            NSArray *p=[self parts:argText];if(!p.count){if(error)*error=[self err:@"Drawing command needs a view ID" line:pc];return NO;}
+            NSInteger viewID=[[self evaluate:p[0] variables:vars]integerValue];if(viewID<=0){if(error)*error=[self err:@"View ID must be a positive integer" line:pc];return NO;}
+            NSMutableArray *args=[NSMutableArray array];
             for(NSUInteger i=1;i<p.count;i++)[args addObject:[self evaluate:p[i] variables:vars]?:@0];
-            [self.platform drawCommand:command onView:view arguments:args];continue;
+            [self.platform drawCommand:command onViewID:viewID arguments:args];continue;
         }
         if([u isEqual:@"BEEP"]){[self.platform beep];continue;}
         if([u hasPrefix:@"RANDOMIZE"]){srandom((unsigned)(raw.length>9?[[self evaluate:[raw substringFromIndex:9] variables:vars]integerValue]:time(NULL)));continue;}

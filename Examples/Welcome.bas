@@ -14,5 +14,4 @@ FOR i = 1 TO 4
   PRINT "Double", i, "is", Double(i)
 NEXT i
 
-WINDOW OPEN "Hello from MacBasic", 480, 240
-
+WINDOW OPEN 1, "Hello from MacBasic", 480, 240

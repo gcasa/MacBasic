@@ -10,14 +10,14 @@
     [self writeText:prompt]; char buffer[4096] = {0};
     return fgets(buffer, sizeof buffer, stdin) ? [NSString stringWithUTF8String:buffer] : @"";
 }
-- (void)openWindowWithTitle:(NSString *)t width:(CGFloat)w height:(CGFloat)h x:(CGFloat)x y:(CGFloat)y {
-    fprintf(stderr, "MacBasic: WINDOW OPEN ignored in console mode (%s)\n", t.UTF8String);
+- (void)openWindowWithID:(NSInteger)windowID title:(NSString *)t width:(CGFloat)w height:(CGFloat)h x:(CGFloat)x y:(CGFloat)y {
+    fprintf(stderr, "MacBasic: WINDOW OPEN ignored in console mode (ID %ld, %s)\n",(long)windowID,t.UTF8String);
 }
-- (void)closeWindowWithTitle:(NSString *)t {}
-- (void)addViewNamed:(NSString *)name toWindow:(NSString *)window x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height {
-    fprintf(stderr, "MacBasic: VIEW ADD ignored in console mode (%s)\n", name.UTF8String);
+- (void)closeWindowWithID:(NSInteger)windowID {}
+- (void)addViewWithID:(NSInteger)viewID toWindowID:(NSInteger)windowID x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height {
+    fprintf(stderr, "MacBasic: VIEW ADD ignored in console mode (view ID %ld, window ID %ld)\n",(long)viewID,(long)windowID);
 }
-- (void)drawCommand:(NSString *)command onView:(NSString *)view arguments:(NSArray *)arguments {}
+- (void)drawCommand:(NSString *)command onViewID:(NSInteger)viewID arguments:(NSArray *)arguments {}
 - (void)playSound:(NSString *)name { fprintf(stderr, "MacBasic: SOUND PLAY ignored in console mode (%s)\n", name.UTF8String); }
 - (void)playTone:(double)frequency duration:(double)duration volume:(double)volume voice:(NSInteger)voice waveform:(NSInteger)waveform {
     fprintf(stderr, "MacBasic: SOUND tone ignored in console mode\n");

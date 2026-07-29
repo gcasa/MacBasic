@@ -4,12 +4,12 @@
 - (void)writeText:(NSString *)text;
 - (void)clearText;
 - (NSString *)readInput:(NSString *)prompt;
-- (void)openWindowWithTitle:(NSString *)title width:(CGFloat)width height:(CGFloat)height
-                          x:(CGFloat)x y:(CGFloat)y;
-- (void)closeWindowWithTitle:(NSString *)title;
-- (void)addViewNamed:(NSString *)name toWindow:(NSString *)window
-                   x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height;
-- (void)drawCommand:(NSString *)command onView:(NSString *)view arguments:(NSArray *)arguments;
+- (void)openWindowWithID:(NSInteger)windowID title:(NSString *)title
+                   width:(CGFloat)width height:(CGFloat)height x:(CGFloat)x y:(CGFloat)y;
+- (void)closeWindowWithID:(NSInteger)windowID;
+- (void)addViewWithID:(NSInteger)viewID toWindowID:(NSInteger)windowID
+                    x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height;
+- (void)drawCommand:(NSString *)command onViewID:(NSInteger)viewID arguments:(NSArray *)arguments;
 - (void)playSound:(NSString *)name;
 - (void)playTone:(double)frequency duration:(double)duration volume:(double)volume voice:(NSInteger)voice waveform:(NSInteger)waveform;
 - (void)speakText:(NSString *)text;

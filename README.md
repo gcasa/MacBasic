@@ -27,11 +27,11 @@ FUNCTION Square(n)
   RETURN n * n
 END FUNCTION
 
-WINDOW OPEN "MacBasic Demo", 520, 260, 120, 180
-VIEW ADD "canvas", "MacBasic Demo", 10, 10, 500, 220
-DRAW RECT "canvas", 20, 20, 180, 80, "#4F46E5", 1
-DRAW TEXT "canvas", "Hello from MacBasic", 34, 50, "white"
-DRAW LINE "canvas", 20, 120, 460, 120, "cyan"
+WINDOW OPEN 1, "MacBasic Demo", 520, 260, 120, 180
+VIEW ADD 10, 1, 10, 10, 500, 220
+DRAW RECT 10, 20, 20, 180, 80, "#4F46E5", 1
+DRAW TEXT 10, "Hello from MacBasic", 34, 50, "white"
+DRAW LINE 10, 20, 120, 460, 120, "cyan"
 SOUND PLAY "Glass"
 
 Names:
@@ -90,12 +90,15 @@ Run a script without opening the editor:
 - Procedures: `SUB` / `END SUB`, `FUNCTION` / `RETURN` / `END FUNCTION`.
 - Built-ins: `PRINT`, `INPUT`, `WINDOW OPEN`, `WINDOW CLOSE`,
   `PROCESS RUN`, `SLEEP`, `RND`, `STR$`, `VAL`, and `LEN`.
-- `WINDOW OPEN` accepts `title, width, height[, x, y]`; coordinates are
-  screen coordinates and may be omitted to use normal window placement.
-- `VIEW ADD name, window, x, y, width, height` creates a named drawing canvas.
+- `WINDOW OPEN id, title, width, height[, x, y]` creates a window identified
+  by a positive numeric ID. Coordinates are optional screen coordinates.
+  `WINDOW CLOSE id` closes that window without depending on its title.
+- `VIEW ADD viewId, windowId, x, y, width, height` creates a drawing canvas
+  in the window selected by ID.
 - Drawing commands are `DRAW LINE`, `DRAW RECT`, `DRAW OVAL`, and `DRAW TEXT`.
-  Shapes accept an optional color and fill flag. `CLEAR view[, color]` clears
-  a canvas. Colors may be names (`red`, `green`, `blue`, `cyan`, `white`,
+  Their first argument is the numeric view ID. Shapes accept an optional color
+  and fill flag. `CLEAR viewId[, color]` clears a canvas. Colors may be names
+  (`red`, `green`, `blue`, `cyan`, `white`,
   `black`, `yellow`, `gray`) or HTML-style `#RRGGBB` values.
 - `BEEP` plays the system alert. `SOUND PLAY name$` plays a system-named sound
   or a sound-file path; `SOUND STOP` stops sounds started by the program.
