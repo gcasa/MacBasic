@@ -1,0 +1,16 @@
+{
+    ApplicationName = MacBasic;
+    ApplicationDescription = "A structured BASIC IDE";
+    ApplicationIcon = MacBasicIcon.png;
+    NSExecutable = MacBasic;
+    NSPrincipalClass = NSApplication;
+    NSTypes = (
+        {
+            NSName = "MacBasic Source";
+            NSDocumentClass = MBDocument;
+            NSRole = Editor;
+            NSUnixExtensions = (bas);
+            NSIcon = MacBasicDocumentIcon.png;
+        }
+    );
+}
