@@ -1,4 +1,5 @@
 ' MacBasic welcome program
+' String literals use the straight ASCII U+0022 delimiter only.
 SUB Banner(title$)
   PRINT "=== " + title$ + " ==="
 END SUB

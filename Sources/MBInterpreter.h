@@ -21,7 +21,27 @@
 - (void)runProcess:(NSString *)path arguments:(NSArray<NSString *> *)arguments;
 @end
 
-@interface MBInterpreter : NSObject
+@interface MBInterpreter : NSObject {
+    BOOL _stopped;
+    id<MBPlatform> _platform;
+    NSArray *_lines;
+    NSMutableDictionary *_procedures;
+    NSMutableArray *_dataItems;
+    NSMutableDictionary *_dataLabels;
+    NSUInteger _dataIndex;
+    NSInteger _optionBase;
+    NSMutableDictionary *_files;
+    NSMutableDictionary *_labelLines;
+    NSMutableArray *_areaPoints;
+    NSMutableDictionary *_waveforms;
+    NSMutableDictionary *_memory;
+    NSNumber *_errorHandlerLine;
+    NSUInteger _currentLine;
+    NSUInteger _faultLine;
+    NSNumber *_resumeTarget;
+    NSMutableDictionary *_objects;
+    NSMutableDictionary *_defaultTypes;
+}
 @property (atomic) BOOL stopped;
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform;
 - (BOOL)runSource:(NSString *)source error:(NSError **)error;

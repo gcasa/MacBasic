@@ -1,4 +1,5 @@
 ' MacBasic drawing example
+' String literals use the straight ASCII U+0022 delimiter only.
 WINDOW OPEN 1, "Drawing Demo", 640, 420, 160, 140
 VIEW ADD 10, 1, 20, 20, 600, 360
 

@@ -1,26 +1,50 @@
 #import "MBDocument.h"
 
+#define MB_KEY(value) _Generic((value), \
+    char: @((long long)(value)), signed char: @((long long)(value)), unsigned char: @((unsigned long long)(value)), \
+    short: @((long long)(value)), unsigned short: @((unsigned long long)(value)), \
+    int: @((long long)(value)), unsigned int: @((unsigned long long)(value)), \
+    long: @((long long)(value)), unsigned long: @((unsigned long long)(value)), \
+    long long: @((long long)(value)), unsigned long long: @((unsigned long long)(value)), \
+    default: (value))
+static id MBGet(id collection,id key) {
+    if([collection isKindOfClass:[NSArray class]])return [collection objectAtIndex:[key unsignedIntegerValue]];
+    return [collection objectForKey:key];
+}
+static void MBSet(id collection,id key,id value) {
+    if([collection isKindOfClass:[NSMutableArray class]])[collection replaceObjectAtIndex:[key unsignedIntegerValue] withObject:value];
+    else [collection setObject:value forKey:key];
+}
+#define MB_GET(collection,key) MBGet((collection),MB_KEY(key))
+#define MB_SET(collection,key,value) MBSet((collection),MB_KEY(key),(value))
+
 static NSColor *MBColor(id value) {
     NSString *s=[[value description] lowercaseString];
     NSDictionary *named=@{@"black":[NSColor blackColor],@"white":[NSColor whiteColor],
         @"red":[NSColor redColor],@"green":[NSColor greenColor],@"blue":[NSColor blueColor],
         @"cyan":[NSColor cyanColor],@"yellow":[NSColor yellowColor],@"gray":[NSColor grayColor],
         @"magenta":[NSColor magentaColor],@"orange":[NSColor orangeColor]};
-    if(named[s])return named[s];
+    if(MB_GET(named,s))return MB_GET(named,s);
     if([s hasPrefix:@"#"]&&s.length==7){unsigned int rgb=0;[[NSScanner scannerWithString:[s substringFromIndex:1]]scanHexInt:&rgb];
         return [NSColor colorWithCalibratedRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:1];}
     return [NSColor blackColor];
 }
 
-@interface MBCanvasView : NSView
-@property NSMutableArray<NSDictionary *> *commands;
-@property NSString *lastKey;
+@interface MBCanvasView : NSView {
+    NSMutableArray *_commands;
+    NSString *_lastKey;
+    NSPoint _mousePosition;
+    BOOL _mousePressed;
+}
+@property (retain) NSMutableArray<NSDictionary *> *commands;
+@property (copy) NSString *lastKey;
 @property NSPoint mousePosition;
 @property BOOL mousePressed;
 - (void)addDrawingCommand:(NSDictionary *)command;
 @end
 @implementation MBCanvasView
-- (instancetype)initWithFrame:(NSRect)frame {if((self=[super initWithFrame:frame]))_commands=[NSMutableArray array];return self;}
+@synthesize commands=_commands, lastKey=_lastKey, mousePosition=_mousePosition, mousePressed=_mousePressed;
+- (instancetype)initWithFrame:(NSRect)frame {if((self=[super initWithFrame:frame]))_commands=[[NSMutableArray alloc]init];return self;}
 - (BOOL)isFlipped {return YES;}
 - (BOOL)acceptsFirstResponder {return YES;}
 - (void)keyDown:(NSEvent *)event {self.lastKey=event.characters?:@"";}
@@ -29,62 +53,67 @@ static NSColor *MBColor(id value) {
 - (void)mouseMoved:(NSEvent *)event {self.mousePosition=[self convertPoint:event.locationInWindow fromView:nil];}
 - (void)mouseDragged:(NSEvent *)event {[self mouseMoved:event];}
 - (void)addDrawingCommand:(NSDictionary *)command {
-    if([command[@"type"]isEqual:@"CLEAR"])[self.commands removeAllObjects];
-    if([command[@"type"]isEqual:@"PAINT"]){
-        NSArray *paint=command[@"args"];NSPoint point=NSMakePoint([paint[0]doubleValue],[paint[1]doubleValue]);
-        for(NSInteger i=(NSInteger)self.commands.count-1;i>=0;i--){NSDictionary *old=self.commands[i];NSArray *a=old[@"args"];NSRect r=NSZeroRect;
-            if(([@[@"RECT",@"OVAL"]containsObject:old[@"type"]])&&a.count>=4)r=NSMakeRect([a[0]doubleValue],[a[1]doubleValue],[a[2]doubleValue],[a[3]doubleValue]);
-            if(NSPointInRect(point,r)){NSMutableArray *args=[a mutableCopy];while(args.count<6)[args addObject:@0];args[4]=paint.count>2?paint[2]:@"black";args[5]=@1;
-                self.commands[i]=@{@"type":old[@"type"],@"args":args};[self setNeedsDisplay:YES];return;}}
+    if([MB_GET(command,@"type")isEqual:@"CLEAR"])[self.commands removeAllObjects];
+    if([MB_GET(command,@"type")isEqual:@"PAINT"]){
+        NSArray *paint=MB_GET(command,@"args");NSPoint point=NSMakePoint([MB_GET(paint,0)doubleValue],[MB_GET(paint,1)doubleValue]);
+        for(NSInteger i=(NSInteger)self.commands.count-1;i>=0;i--){NSDictionary *old=MB_GET(self.commands,i);NSArray *a=MB_GET(old,@"args");NSRect r=NSZeroRect;
+            if(([@[@"RECT",@"OVAL"]containsObject:MB_GET(old,@"type")])&&a.count>=4)r=NSMakeRect([MB_GET(a,0)doubleValue],[MB_GET(a,1)doubleValue],[MB_GET(a,2)doubleValue],[MB_GET(a,3)doubleValue]);
+            if(NSPointInRect(point,r)){NSMutableArray *args=[a mutableCopy];while(args.count<6)[args addObject:@0];MB_SET(args,4,paint.count>2?MB_GET(paint,2):@"black");MB_SET(args,5,@1);
+                MB_SET(self.commands,i,(@{@"type":MB_GET(old,@"type"),@"args":args}));[self setNeedsDisplay:YES];return;}}
     }
     [self.commands addObject:command];[self setNeedsDisplay:YES];
 }
 - (void)drawRect:(NSRect)dirtyRect {
     [[NSColor whiteColor]setFill];NSRectFill(self.bounds);
-    for(NSDictionary *c in self.commands){NSString *type=c[@"type"];NSArray *a=c[@"args"];
-        if([type isEqual:@"CLEAR"]){[(a.count?MBColor(a[0]):[NSColor whiteColor])setFill];NSRectFill(self.bounds);continue;}
-        if([type isEqual:@"LINE"]&&a.count>=4){[(a.count>=5?MBColor(a[4]):[NSColor blackColor])setStroke];
-            NSBezierPath *p=[NSBezierPath bezierPath];[p moveToPoint:NSMakePoint([a[0]doubleValue],[a[1]doubleValue])];
-            [p lineToPoint:NSMakePoint([a[2]doubleValue],[a[3]doubleValue])];[p stroke];continue;}
+    for(NSDictionary *c in self.commands){NSString *type=MB_GET(c,@"type");NSArray *a=MB_GET(c,@"args");
+        if([type isEqual:@"CLEAR"]){[(a.count?MBColor(MB_GET(a,0)):[NSColor whiteColor])setFill];NSRectFill(self.bounds);continue;}
+        if([type isEqual:@"LINE"]&&a.count>=4){[(a.count>=5?MBColor(MB_GET(a,4)):[NSColor blackColor])setStroke];
+            NSBezierPath *p=[NSBezierPath bezierPath];[p moveToPoint:NSMakePoint([MB_GET(a,0)doubleValue],[MB_GET(a,1)doubleValue])];
+            [p lineToPoint:NSMakePoint([MB_GET(a,2)doubleValue],[MB_GET(a,3)doubleValue])];[p stroke];continue;}
         if(([type isEqual:@"RECT"]||[type isEqual:@"OVAL"])&&a.count>=4){
-            NSRect r=NSMakeRect([a[0]doubleValue],[a[1]doubleValue],[a[2]doubleValue],[a[3]doubleValue]);
+            NSRect r=NSMakeRect([MB_GET(a,0)doubleValue],[MB_GET(a,1)doubleValue],[MB_GET(a,2)doubleValue],[MB_GET(a,3)doubleValue]);
             NSBezierPath *p=[type isEqual:@"OVAL"]?[NSBezierPath bezierPathWithOvalInRect:r]:[NSBezierPath bezierPathWithRect:r];
-            NSColor *color=a.count>=5?MBColor(a[4]):[NSColor blackColor];
-            if(a.count>=6&&[a[5]boolValue]){[color setFill];[p fill];}else{[color setStroke];[p stroke];}continue;
+            NSColor *color=a.count>=5?MBColor(MB_GET(a,4)):[NSColor blackColor];
+            if(a.count>=6&&[MB_GET(a,5)boolValue]){[color setFill];[p fill];}else{[color setStroke];[p stroke];}continue;
         }
-        if([type isEqual:@"TEXT"]&&a.count>=3){NSColor *color=a.count>=4?MBColor(a[3]):[NSColor blackColor];
+        if([type isEqual:@"TEXT"]&&a.count>=3){NSColor *color=a.count>=4?MBColor(MB_GET(a,3)):[NSColor blackColor];
             NSDictionary *attrs=@{NSForegroundColorAttributeName:color,NSFontAttributeName:[NSFont systemFontOfSize:14]};
-            [[a[0]description]drawAtPoint:NSMakePoint([a[1]doubleValue],[a[2]doubleValue])withAttributes:attrs];}
+            [[MB_GET(a,0)description]drawAtPoint:NSMakePoint([MB_GET(a,1)doubleValue],[MB_GET(a,2)doubleValue])withAttributes:attrs];}
         if([type isEqual:@"POLYGON"]&&a.count>=7){NSBezierPath *p=[NSBezierPath bezierPath];
-            [p moveToPoint:NSMakePoint([a[0]doubleValue],[a[1]doubleValue])];
-            for(NSUInteger i=2;i+1<a.count-1;i+=2)[p lineToPoint:NSMakePoint([a[i]doubleValue],[a[i+1]doubleValue])];
+            [p moveToPoint:NSMakePoint([MB_GET(a,0)doubleValue],[MB_GET(a,1)doubleValue])];
+            for(NSUInteger i=2;i+1<a.count-1;i+=2)[p lineToPoint:NSMakePoint([MB_GET(a,i)doubleValue],[MB_GET(a,i+1)doubleValue])];
             [p closePath];[MBColor(a.lastObject)setFill];[p fill];}
     }
 }
 @end
 
 @interface MBDocument ()
-@property NSTextView *editor;
-@property NSTextView *output;
-@property MBInterpreter *interpreter;
-@property NSMutableDictionary<NSNumber *, NSWindow *> *basicWindows;
-@property NSMutableDictionary<NSNumber *, MBCanvasView *> *canvasViews;
+@property (retain) NSTextView *editor;
+@property (retain) NSTextView *output;
+@property (retain) MBInterpreter *interpreter;
+@property (retain) NSMutableDictionary<NSNumber *, NSWindow *> *basicWindows;
+@property (retain) NSMutableDictionary<NSNumber *, MBCanvasView *> *canvasViews;
 @property NSInteger activeCanvasID;
-@property NSMutableArray<NSSound *> *playingSounds;
+@property (retain) NSMutableArray<NSSound *> *playingSounds;
 @property NSInteger lastMenu;
 @property NSInteger lastMenuItem;
-@property NSString *sourceBeforeWindow;
+@property (copy) NSString *sourceBeforeWindow;
 @property BOOL programRunning;
 @property BOOL closingDocument;
 @end
 
 @implementation MBDocument
+@synthesize editor=_editor, output=_output, interpreter=_interpreter, basicWindows=_basicWindows;
+@synthesize canvasViews=_canvasViews, activeCanvasID=_activeCanvasID, playingSounds=_playingSounds;
+@synthesize lastMenu=_lastMenu, lastMenuItem=_lastMenuItem, sourceBeforeWindow=_sourceBeforeWindow;
+@synthesize programRunning=_programRunning, closingDocument=_closingDocument;
 - (instancetype)init {
     if ((self=[super init])) {
-        _basicWindows=[NSMutableDictionary dictionary];
-        _canvasViews=[NSMutableDictionary dictionary];
-        _playingSounds=[NSMutableArray array];
+        _basicWindows=[[NSMutableDictionary alloc]init];
+        _canvasViews=[[NSMutableDictionary alloc]init];
+        _playingSounds=[[NSMutableArray alloc]init];
         _sourceBeforeWindow=@"' Welcome to MacBasic\n"
+            "' String literals use the straight ASCII U+0022 delimiter only.\n"
             "SUB Greet(name$)\n"
             "  PRINT \"Hello, \" + name$\n"
             "END SUB\n\n"
@@ -123,6 +152,9 @@ static NSColor *MBColor(id value) {
     if(editable){
         v.backgroundColor=[NSColor colorWithCalibratedRed:0.95 green:0.93 blue:0.86 alpha:1.0];
         v.textColor=[NSColor blackColor];
+#if !defined(GNUSTEP)
+        v.automaticQuoteSubstitutionEnabled=NO;
+#endif
     }else{
         v.backgroundColor=[NSColor whiteColor];v.textColor=[NSColor blackColor];
     }
@@ -188,7 +220,7 @@ static NSColor *MBColor(id value) {
                  color:[NSColor colorWithCalibratedRed:0.65 green:0.32 blue:0.05 alpha:1] options:0];
     [self colorPattern:@"\\b[A-Za-z_][A-Za-z0-9_$]*(?=\\s*\\()"
                  color:[NSColor colorWithCalibratedRed:0.05 green:0.46 blue:0.40 alpha:1] options:0];
-    [self colorPattern:@"\"(?:\"\"|[^\"])*\""
+    [self colorPattern:@"\"(?:\"\"|[^\"\\r\\n])*\""
                  color:[NSColor colorWithCalibratedRed:0.70 green:0.12 blue:0.18 alpha:1] options:0];
     [self colorPattern:@"(?im)(?:'[^\r\n]*|\\bREM\\b[^\r\n]*)"
                  color:[NSColor colorWithCalibratedRed:0.35 green:0.45 blue:0.35 alpha:1] options:0];
@@ -223,23 +255,25 @@ static NSColor *MBColor(id value) {
 - (void)clearText {[self performSelectorOnMainThread:@selector(clearOutput) withObject:nil waitUntilDone:NO];}
 - (void)clearOutput {self.output.string=@"";}
 - (void)collectInput:(NSMutableDictionary *)request {
-    NSAlert *alert=[NSAlert new];alert.messageText=request[@"prompt"]?:@"Input";
-    NSTextField *field=[[NSTextField alloc]initWithFrame:NSMakeRect(0,0,320,24)];alert.accessoryView=field;
+    NSAlert *alert=[NSAlert new];alert.messageText=MB_GET(request,@"prompt")?:@"Input";
+    NSTextField *field=[[NSTextField alloc]initWithFrame:NSMakeRect(0,0,320,24)];
+    if([alert respondsToSelector:@selector(setAccessoryView:)])
+        [alert performSelector:@selector(setAccessoryView:) withObject:field];
     [alert addButtonWithTitle:@"OK"];[alert addButtonWithTitle:@"Cancel"];
-    request[@"value"]=[alert runModal]==NSAlertFirstButtonReturn?field.stringValue:@"";
+    MB_SET(request,@"value",[alert runModal]==NSAlertFirstButtonReturn?field.stringValue:@"");
 }
 - (NSString *)readInput:(NSString *)prompt {
     NSMutableDictionary *request=[@{@"prompt":prompt?:@"Input"}mutableCopy];
     [self performSelectorOnMainThread:@selector(collectInput:) withObject:request waitUntilDone:YES];
-    return request[@"value"]?:@"";
+    return MB_GET(request,@"value")?:@"";
 }
 - (void)createBasicWindow:(NSDictionary *)spec {
     if(self.closingDocument)return;
-    CGFloat width=[spec[@"width"]doubleValue],height=[spec[@"height"]doubleValue];
-    NSWindow *existing=self.basicWindows[spec[@"id"]];
-    if(existing){for(NSNumber *viewID in [self.canvasViews.allKeys copy])if(self.canvasViews[viewID].window==existing)[self.canvasViews removeObjectForKey:viewID];[existing orderOut:nil];[existing close];}
+    CGFloat width=[MB_GET(spec,@"width")doubleValue],height=[MB_GET(spec,@"height")doubleValue];
+    NSWindow *existing=MB_GET(self.basicWindows,MB_GET(spec,@"id"));
+    if(existing){for(NSNumber *viewID in [self.canvasViews.allKeys copy])if([(MBCanvasView *)MB_GET(self.canvasViews,viewID) window]==existing)[self.canvasViews removeObjectForKey:viewID];[existing orderOut:nil];[existing close];}
     NSRect frame=NSMakeRect(160,160,width,height);
-    if([spec[@"positioned"]boolValue])frame.origin=NSMakePoint([spec[@"x"]doubleValue],[spec[@"y"]doubleValue]);
+    if([MB_GET(spec,@"positioned")boolValue])frame.origin=NSMakePoint([MB_GET(spec,@"x")doubleValue],[MB_GET(spec,@"y")doubleValue]);
     NSWindow *w=[[NSWindow alloc]initWithContentRect:frame
         styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
@@ -247,9 +281,9 @@ static NSColor *MBColor(id value) {
 #if !defined(GNUSTEP)
     w.animationBehavior=NSWindowAnimationBehaviorNone;
 #endif
-    w.title=spec[@"title"];NSTextField *label=[[NSTextField alloc]initWithFrame:NSMakeRect(20,height/2-15,width-40,30)];
+    w.title=MB_GET(spec,@"title");NSTextField *label=[[NSTextField alloc]initWithFrame:NSMakeRect(20,height/2-15,width-40,30)];
     label.stringValue=w.title;label.alignment=NSTextAlignmentCenter;label.editable=NO;label.bezeled=NO;label.drawsBackground=NO;
-    [w.contentView addSubview:label];self.basicWindows[spec[@"id"]]=w;[w makeKeyAndOrderFront:nil];
+    [w.contentView addSubview:label];MB_SET(self.basicWindows,MB_GET(spec,@"id"),w);[w makeKeyAndOrderFront:nil];
 }
 - (void)openWindowWithID:(NSInteger)windowID title:(NSString *)title width:(CGFloat)width height:(CGFloat)height x:(CGFloat)x y:(CGFloat)y {
     NSDictionary *spec=@{@"id":@(windowID),@"title":title,@"width":@(width),@"height":@(height),
@@ -257,8 +291,8 @@ static NSColor *MBColor(id value) {
     [self performSelectorOnMainThread:@selector(createBasicWindow:) withObject:spec waitUntilDone:YES];
 }
 - (void)closeBasicWindow:(NSNumber *)windowID {
-    NSWindow *window=self.basicWindows[windowID];if(window){
-        for(NSNumber *viewID in [self.canvasViews.allKeys copy])if(self.canvasViews[viewID].window==window)[self.canvasViews removeObjectForKey:viewID];
+    NSWindow *window=MB_GET(self.basicWindows,windowID);if(window){
+        for(NSNumber *viewID in [self.canvasViews.allKeys copy])if([(MBCanvasView *)MB_GET(self.canvasViews,viewID) window]==window)[self.canvasViews removeObjectForKey:viewID];
         [window orderOut:nil];[window close];[self.basicWindows removeObjectForKey:windowID];}
 }
 - (void)closeWindowWithID:(NSInteger)windowID {
@@ -266,14 +300,14 @@ static NSColor *MBColor(id value) {
 }
 - (void)createCanvas:(NSDictionary *)spec {
     if(self.closingDocument)return;
-    NSWindow *target=self.basicWindows[spec[@"windowID"]];
-    if(!target){[self appendOutput:[NSString stringWithFormat:@"Drawing error: window ID %@ not found.\n",spec[@"windowID"]]];return;}
-    MBCanvasView *canvas=[[MBCanvasView alloc]initWithFrame:NSMakeRect([spec[@"x"]doubleValue],[spec[@"y"]doubleValue],
-        [spec[@"width"]doubleValue],[spec[@"height"]doubleValue])];
-    [self.canvasViews[spec[@"viewID"]]removeFromSuperview];
+    NSWindow *target=MB_GET(self.basicWindows,MB_GET(spec,@"windowID"));
+    if(!target){[self appendOutput:[NSString stringWithFormat:@"Drawing error: window ID %@ not found.\n",MB_GET(spec,@"windowID")]];return;}
+    MBCanvasView *canvas=[[MBCanvasView alloc]initWithFrame:NSMakeRect([MB_GET(spec,@"x")doubleValue],[MB_GET(spec,@"y")doubleValue],
+        [MB_GET(spec,@"width")doubleValue],[MB_GET(spec,@"height")doubleValue])];
+    [MB_GET(self.canvasViews,MB_GET(spec,@"viewID"))removeFromSuperview];
     canvas.autoresizingMask=NSViewMaxXMargin|NSViewMaxYMargin;
-    [target.contentView addSubview:canvas];self.canvasViews[spec[@"viewID"]]=canvas;
-    self.activeCanvasID=[spec[@"viewID"]integerValue];
+    [target.contentView addSubview:canvas];MB_SET(self.canvasViews,MB_GET(spec,@"viewID"),canvas);
+    self.activeCanvasID=[MB_GET(spec,@"viewID")integerValue];
     target.acceptsMouseMovedEvents=YES;[target makeFirstResponder:canvas];
 }
 - (void)addViewWithID:(NSInteger)viewID toWindowID:(NSInteger)windowID x:(CGFloat)x y:(CGFloat)y width:(CGFloat)width height:(CGFloat)height {
@@ -281,8 +315,8 @@ static NSColor *MBColor(id value) {
     [self performSelectorOnMainThread:@selector(createCanvas:) withObject:spec waitUntilDone:YES];
 }
 - (void)applyDrawingCommand:(NSDictionary *)command {
-    NSNumber *viewID=[command[@"viewID"]integerValue]>=0?command[@"viewID"]:@(self.activeCanvasID);
-    MBCanvasView *canvas=self.canvasViews[viewID];
+    NSNumber *viewID=[MB_GET(command,@"viewID")integerValue]>=0?MB_GET(command,@"viewID"):@(self.activeCanvasID);
+    MBCanvasView *canvas=MB_GET(self.canvasViews,viewID);
     if(!canvas){[self appendOutput:[NSString stringWithFormat:@"Drawing error: view ID %@ not found.\n",viewID]];return;}
     [canvas addDrawingCommand:command];
 }
@@ -324,8 +358,8 @@ static NSColor *MBColor(id value) {
 #undef W32
 }
 - (void)playToneSpec:(NSDictionary *)spec {
-    NSSound *sound=[[NSSound alloc]initWithData:[self toneDataAtFrequency:[spec[@"frequency"]doubleValue] duration:[spec[@"duration"]doubleValue]
-        volume:[spec[@"volume"]doubleValue] waveform:[spec[@"waveform"]integerValue]]];
+    NSSound *sound=[[NSSound alloc]initWithData:[self toneDataAtFrequency:[MB_GET(spec,@"frequency")doubleValue] duration:[MB_GET(spec,@"duration")doubleValue]
+        volume:[MB_GET(spec,@"volume")doubleValue] waveform:[MB_GET(spec,@"waveform")integerValue]]];
     if(sound){[self.playingSounds addObject:sound];[sound play];}
 }
 - (void)playTone:(double)frequency duration:(double)duration volume:(double)volume voice:(NSInteger)voice waveform:(NSInteger)waveform {
@@ -351,7 +385,7 @@ static NSColor *MBColor(id value) {
 }
 - (void)performBeep {NSBeep();}
 - (id)inputValue:(NSString *)name argument:(NSInteger)argument {
-    __block id value=@0;MBCanvasView *canvas=self.canvasViews[@(self.activeCanvasID)];
+    id value=@0;MBCanvasView *canvas=MB_GET(self.canvasViews,@(self.activeCanvasID));
     if([[name uppercaseString]isEqual:@"INKEY$"]){value=canvas.lastKey?:@"";canvas.lastKey=@"";}
     else if([[name uppercaseString]isEqual:@"MOUSE"]){if(argument==0)value=@(canvas.mousePressed?-1:0);else if(argument==1)value=@(canvas.mousePosition.x);else value=@(canvas.mousePosition.y);}
     return value;
@@ -360,12 +394,12 @@ static NSColor *MBColor(id value) {
     self.lastMenu=sender.tag/100;self.lastMenuItem=sender.tag%100;
 }
 - (void)applyMenuSpec:(NSDictionary *)spec {
-    NSInteger menu=[spec[@"menu"]integerValue],item=[spec[@"item"]integerValue],state=[spec[@"state"]integerValue];NSString *title=spec[@"title"];
+    NSInteger menu=[MB_GET(spec,@"menu")integerValue],item=[MB_GET(spec,@"item")integerValue],state=[MB_GET(spec,@"state")integerValue];NSString *title=MB_GET(spec,@"title");
     NSMenuItem *top=nil;for(NSMenuItem *candidate in NSApp.mainMenu.itemArray)if(candidate.tag==5000+menu){top=candidate;break;}
     if(!top){top=[[NSMenuItem alloc]initWithTitle:(item==0&&title.length?title:[NSString stringWithFormat:@"Menu %ld",(long)menu]) action:NULL keyEquivalent:@""];
         top.tag=5000+menu;top.submenu=[[NSMenu alloc]initWithTitle:top.title];[NSApp.mainMenu addItem:top];}
     if(item==0){if(title.length)top.title=title;top.enabled=state!=0;return;}
-    NSMenuItem *entry=[top.submenu itemWithTag:menu*100+item];
+    NSMenuItem *entry=(NSMenuItem *)[top.submenu itemWithTag:menu*100+item];
     if(!entry){entry=[[NSMenuItem alloc]initWithTitle:(title.length?title:[NSString stringWithFormat:@"Item %ld",(long)item])
         action:@selector(basicMenuChosen:) keyEquivalent:@""];entry.target=self;entry.tag=menu*100+item;[top.submenu addItem:entry];}
     if(title.length)entry.title=title;entry.enabled=state!=0;entry.state=state==2?NSControlStateValueOn:NSControlStateValueOff;

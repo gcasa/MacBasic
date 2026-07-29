@@ -63,8 +63,19 @@ On a GNUstep system (install the GNUstep development and GUI packages first):
 ```sh
 . /usr/share/GNUstep/Makefiles/GNUstep.sh
 make
-./build/MacBasic
+openapp ./build/MacBasic.app
 ```
+
+The GNUstep build uses Clang and the distribution's standard Objective-C
+runtime; it does not require ARC or libobjc2. On Ubuntu 24.04 the required
+packages are `clang`, `make`, `gnustep-devel`, and `libgnustep-gui-dev`.
+Run `make test-gnustep-docker` to reproduce the GNUstep build and language
+tests in a container.
+
+On macOS, `make` creates the native bundle at `build/MacBasic.app`. On
+GNUstep, it creates the GNUstep wrapper at the same path. The standalone
+`build/MacBasic` executable remains available for command-line scripts and
+tests.
 
 Run a script without opening the editor:
 

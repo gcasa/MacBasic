@@ -36,9 +36,9 @@
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     [self installMenus];
-    if ([NSDocumentController sharedDocumentController].documents.count == 0) {
+    if ([[[NSDocumentController sharedDocumentController]documents]count] == 0) {
         [[NSDocumentController sharedDocumentController]
-            openUntitledDocumentAndDisplay:YES error:nil];
+            openUntitledDocumentAndDisplay:YES error:NULL];
     }
 #if !defined(GNUSTEP)
     [NSApp activateIgnoringOtherApps:YES];
