@@ -83,6 +83,12 @@ Run a script without opening the editor:
 ./build/MacBasic Examples/Welcome.bas
 ```
 
+In the editor, **Run** executes at full speed. **Trace** runs the same program
+more slowly while highlighting and scrolling to each source line as it is
+executed. **Stop** pauses a trace so **Step** can execute one line at a time;
+press **Stop** again to end it. **Run** or **Trace** resumes a paused program
+in that mode.
+
 Compile a source document with **File → Compile…** or the Compile button in the
 document window. Choose either a native application wrapper or a standalone
 command-line tool. The equivalent command-line form for a tool is:

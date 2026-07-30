@@ -19,6 +19,12 @@ static void MBSet(id collection,id key,id value) {
 #define MB_GET(collection,key) MBGet((collection),MB_KEY(key))
 #define MB_SET(collection,key,value) MBSet((collection),MB_KEY(key),(value))
 
+static NSString * const MBRunToolbarItem=@"org.macbasic.toolbar.run";
+static NSString * const MBTraceToolbarItem=@"org.macbasic.toolbar.trace";
+static NSString * const MBStopToolbarItem=@"org.macbasic.toolbar.stop";
+static NSString * const MBStepToolbarItem=@"org.macbasic.toolbar.step";
+static NSString * const MBCompileToolbarItem=@"org.macbasic.toolbar.compile";
+
 static NSColor *MBColor(id value) {
     NSString *s=[[value description] lowercaseString];
     NSDictionary *named=@{@"black":[NSColor blackColor],@"white":[NSColor whiteColor],
@@ -100,6 +106,9 @@ static NSColor *MBColor(id value) {
 @property NSInteger lastMenuItem;
 @property (copy) NSString *sourceBeforeWindow;
 @property BOOL programRunning;
+@property BOOL tracePaused;
+@property NSUInteger pendingTraceSteps;
+@property (retain) NSCondition *traceCondition;
 @property BOOL closingDocument;
 @end
 
@@ -107,12 +116,14 @@ static NSColor *MBColor(id value) {
 @synthesize editor=_editor, output=_output, interpreter=_interpreter, basicWindows=_basicWindows;
 @synthesize canvasViews=_canvasViews, activeCanvasID=_activeCanvasID, playingSounds=_playingSounds;
 @synthesize lastMenu=_lastMenu, lastMenuItem=_lastMenuItem, sourceBeforeWindow=_sourceBeforeWindow;
-@synthesize programRunning=_programRunning, closingDocument=_closingDocument;
+@synthesize programRunning=_programRunning, tracePaused=_tracePaused, pendingTraceSteps=_pendingTraceSteps;
+@synthesize traceCondition=_traceCondition, closingDocument=_closingDocument;
 - (instancetype)init {
     if ((self=[super init])) {
         _basicWindows=[[NSMutableDictionary alloc]init];
         _canvasViews=[[NSMutableDictionary alloc]init];
         _playingSounds=[[NSMutableArray alloc]init];
+        _traceCondition=[[NSCondition alloc]init];
         _sourceBeforeWindow=@"' Welcome to MacBasic\n"
             "' String literals use the straight ASCII U+0022 delimiter only.\n"
             "SUB Greet(name$)\n"
@@ -137,13 +148,64 @@ static NSColor *MBColor(id value) {
     }
     return self;
 }
-- (NSButton *)button:(NSString *)title action:(SEL)action x:(CGFloat)x {
-    NSButton *b=[[NSButton alloc]initWithFrame:NSMakeRect(x,8,78,30)];
-    b.title=title;b.target=self;b.action=action;
+- (NSImage *)toolbarIconWithSymbol:(NSString *)symbol fallback:(NSString *)fallback {
 #if !defined(GNUSTEP)
-    b.bezelStyle=NSBezelStyleRounded;
+    if(@available(macOS 11.0,*)){
+        NSImage *image=[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil];
+        if(image)return image;
+    }
 #endif
-    return b;
+    return [NSImage imageNamed:fallback];
+}
+- (NSToolbarItem *)toolbarItem:(NSString *)identifier label:(NSString *)label
+                        symbol:(NSString *)symbol fallback:(NSString *)fallback
+                       toolTip:(NSString *)toolTip action:(SEL)action {
+    NSToolbarItem *item=[[NSToolbarItem alloc]initWithItemIdentifier:identifier];
+    item.label=label;item.paletteLabel=label;item.toolTip=toolTip;
+    item.image=[self toolbarIconWithSymbol:symbol fallback:fallback];
+    item.target=self;item.action=action;
+    return item;
+}
+- (NSArray *)toolbarAllowedItemIdentifiers:(NSToolbar *)toolbar {
+    return @[MBRunToolbarItem,MBTraceToolbarItem,MBStopToolbarItem,MBStepToolbarItem,MBCompileToolbarItem,
+             NSToolbarFlexibleSpaceItemIdentifier,NSToolbarSpaceItemIdentifier];
+}
+- (NSArray *)toolbarDefaultItemIdentifiers:(NSToolbar *)toolbar {
+    return @[MBRunToolbarItem,MBTraceToolbarItem,MBStopToolbarItem,MBStepToolbarItem,
+             NSToolbarFlexibleSpaceItemIdentifier,MBCompileToolbarItem];
+}
+- (NSToolbarItem *)toolbar:(NSToolbar *)toolbar
+     itemForItemIdentifier:(NSString *)identifier
+ willBeInsertedIntoToolbar:(BOOL)flag {
+    if([identifier isEqual:MBRunToolbarItem])
+        return [self toolbarItem:identifier label:@"Run" symbol:@"play.fill"
+                       fallback:@"NSRightFacingTriangleTemplate"
+                        toolTip:@"Run the program at full speed" action:@selector(run:)];
+    if([identifier isEqual:MBTraceToolbarItem])
+        return [self toolbarItem:identifier label:@"Trace" symbol:@"point.topleft.down.curvedto.point.bottomright.up"
+                       fallback:@"NSQuickLookTemplate"
+                        toolTip:@"Run slowly and highlight each executing line" action:@selector(trace:)];
+    if([identifier isEqual:MBStopToolbarItem])
+        return [self toolbarItem:identifier label:@"Stop" symbol:@"stop.fill"
+                       fallback:@"NSStopProgressTemplate"
+                        toolTip:@"Pause a trace, or stop the running program" action:@selector(stop:)];
+    if([identifier isEqual:MBStepToolbarItem])
+        return [self toolbarItem:identifier label:@"Step" symbol:@"forward.frame.fill"
+                       fallback:@"NSGoRightTemplate"
+                        toolTip:@"Execute the next line of a paused trace" action:@selector(step:)];
+    if([identifier isEqual:MBCompileToolbarItem])
+        return [self toolbarItem:identifier label:@"Compile" symbol:@"hammer.fill"
+                       fallback:@"NSActionTemplate"
+                        toolTip:@"Compile the program as an application or command-line tool"
+                         action:@selector(compileDocument:)];
+    return nil;
+}
+- (BOOL)validateToolbarItem:(NSToolbarItem *)item {
+    if([item.itemIdentifier isEqual:MBStepToolbarItem])
+        return self.programRunning&&self.tracePaused;
+    if([item.itemIdentifier isEqual:MBStopToolbarItem])
+        return self.programRunning;
+    return YES;
 }
 - (NSScrollView *)scrollWithText:(NSTextView **)text frame:(NSRect)frame editable:(BOOL)editable {
     NSScrollView *s=[[NSScrollView alloc]initWithFrame:frame];s.hasVerticalScroller=YES;s.hasHorizontalScroller=YES;
@@ -172,14 +234,15 @@ static NSColor *MBColor(id value) {
     window.minSize=NSMakeSize(600,420);
     NSTextView *editorText=nil,*outputText=nil;
     NSScrollView *editor=[self scrollWithText:&editorText frame:NSMakeRect(10,205,880,435) editable:YES];
-    NSScrollView *output=[self scrollWithText:&outputText frame:NSMakeRect(10,45,880,150) editable:NO];
+    NSScrollView *output=[self scrollWithText:&outputText frame:NSMakeRect(10,10,880,185) editable:NO];
     self.editor=editorText;self.output=outputText;
     editor.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
     output.autoresizingMask=NSViewWidthSizable|NSViewMaxYMargin;
     NSView *content=window.contentView;[content addSubview:editor];[content addSubview:output];
-    [content addSubview:[self button:@"Run" action:@selector(run:) x:10]];
-    [content addSubview:[self button:@"Stop" action:@selector(stop:) x:96]];
-    [content addSubview:[self button:@"Compile" action:@selector(compileDocument:) x:182]];
+    NSToolbar *toolbar=[[NSToolbar alloc]initWithIdentifier:@"org.macbasic.document.toolbar"];
+    toolbar.delegate=self;toolbar.displayMode=NSToolbarDisplayModeIconAndLabel;
+    toolbar.allowsUserCustomization=YES;toolbar.autosavesConfiguration=NO;
+    window.toolbar=toolbar;
     self.editor.string=self.sourceBeforeWindow?:@"";self.output.string=@"Ready.\n";
     [self highlightSyntax];
     [self addWindowController:[[NSWindowController alloc]initWithWindow:window]];
@@ -229,9 +292,28 @@ static NSColor *MBColor(id value) {
     [storage endEditing];
 }
 - (void)run:(id)sender {
-    if(self.programRunning){[self writeText:@"A program is already running. Stop it before running again.\n"];return;}
+    [self startProgramTracing:NO];
+}
+- (void)trace:(id)sender {
+    [self startProgramTracing:YES];
+}
+- (void)startProgramTracing:(BOOL)tracing {
+    if(self.programRunning){
+        if(self.tracePaused){
+            self.interpreter.tracing=tracing;
+            [self.traceCondition lock];
+            self.tracePaused=NO;self.pendingTraceSteps=0;
+            [self.traceCondition broadcast];
+            [self.traceCondition unlock];
+            [self writeText:tracing?@"Trace resumed.\n":@"Program resumed at full speed.\n"];
+        }else [self writeText:@"A program is already running.\n"];
+        return;
+    }
     self.programRunning=YES;
+    self.tracePaused=NO;self.pendingTraceSteps=0;
     self.output.string=@"";self.interpreter=[[MBInterpreter alloc]initWithPlatform:self];
+    self.interpreter.tracing=tracing;
+    self.editor.editable=NO;
     NSString *source=[self.editor.string copy];
     [NSThread detachNewThreadSelector:@selector(runSourceInBackground:) toTarget:self withObject:source];
 }
@@ -243,8 +325,66 @@ static NSColor *MBColor(id value) {
         [self performSelectorOnMainThread:@selector(programDidFinish) withObject:nil waitUntilDone:NO];
     }
 }
-- (void)programDidFinish {self.programRunning=NO;}
-- (void)stop:(id)sender {self.interpreter.stopped=YES;[self writeText:@"Program stopped.\n"];}
+- (void)programDidFinish {
+    [self.traceCondition lock];
+    self.tracePaused=NO;self.pendingTraceSteps=0;
+    [self.traceCondition broadcast];
+    [self.traceCondition unlock];
+    self.programRunning=NO;
+    self.editor.editable=YES;
+    [self clearTraceHighlight];
+}
+- (void)stop:(id)sender {
+    if(!self.programRunning)return;
+    if(self.interpreter.tracing&&!self.tracePaused){
+        [self.traceCondition lock];
+        self.tracePaused=YES;self.pendingTraceSteps=0;
+        [self.traceCondition unlock];
+        [self writeText:@"Trace paused. Use Step to execute one line, or Stop again to end the program.\n"];
+        return;
+    }
+    self.interpreter.stopped=YES;
+    [self.traceCondition lock];[self.traceCondition broadcast];[self.traceCondition unlock];
+    [self writeText:@"Program stopped.\n"];
+}
+- (void)step:(id)sender {
+    if(!self.programRunning||!self.tracePaused)return;
+    [self.traceCondition lock];
+    self.pendingTraceSteps++;
+    [self.traceCondition signal];
+    [self.traceCondition unlock];
+}
+- (void)showTracedLine:(NSNumber *)lineNumber {
+    NSString *source=self.editor.string;
+    NSUInteger target=lineNumber.unsignedIntegerValue,start=0;
+    for(NSUInteger line=0;line<target&&start<source.length;line++)
+        start=NSMaxRange([source lineRangeForRange:NSMakeRange(start,0)]);
+    if(start>source.length)return;
+    NSRange range=[source lineRangeForRange:NSMakeRange(start,0)];
+    [self.editor.textStorage removeAttribute:NSBackgroundColorAttributeName
+                                      range:NSMakeRange(0,self.editor.textStorage.length)];
+    if(range.length){
+        [self.editor.textStorage addAttribute:NSBackgroundColorAttributeName
+                                        value:[NSColor colorWithCalibratedRed:1.0 green:0.90 blue:0.35 alpha:1.0]
+                                        range:range];
+        [self.editor scrollRangeToVisible:range];
+    }
+}
+- (void)clearTraceHighlight {
+    [self.editor.textStorage removeAttribute:NSBackgroundColorAttributeName
+                                      range:NSMakeRange(0,self.editor.textStorage.length)];
+}
+- (void)traceLine:(NSUInteger)line {
+    [self.traceCondition lock];
+    while(self.tracePaused&&self.pendingTraceSteps==0&&!self.interpreter.stopped)
+        [self.traceCondition wait];
+    if(self.pendingTraceSteps>0)self.pendingTraceSteps--;
+    BOOL stopped=self.interpreter.stopped;
+    [self.traceCondition unlock];
+    if(stopped)return;
+    [self performSelectorOnMainThread:@selector(showTracedLine:) withObject:@(line) waitUntilDone:YES];
+    [NSThread sleepForTimeInterval:0.08];
+}
 - (void)runCompiledSource:(NSString *)source {
     self.sourceBeforeWindow=source;
     [self makeWindowControllers];
@@ -396,6 +536,7 @@ static NSColor *MBColor(id value) {
 - (void)close {
     self.closingDocument=YES;
     self.interpreter.stopped=YES;
+    [self.traceCondition lock];[self.traceCondition broadcast];[self.traceCondition unlock];
     for(NSWindow *window in self.basicWindows.allValues){[window orderOut:nil];[window close];}
     [self.canvasViews removeAllObjects];[self.basicWindows removeAllObjects];
     [super close];

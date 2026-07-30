@@ -19,10 +19,13 @@
 - (void)setMenu:(NSInteger)menu item:(NSInteger)item state:(NSInteger)state title:(NSString *)title;
 - (NSInteger)menuValue:(NSInteger)which reset:(BOOL)reset;
 - (void)runProcess:(NSString *)path arguments:(NSArray<NSString *> *)arguments;
+@optional
+- (void)traceLine:(NSUInteger)line;
 @end
 
 @interface MBInterpreter : NSObject {
     BOOL _stopped;
+    BOOL _tracing;
     id<MBPlatform> _platform;
     NSArray *_lines;
     NSMutableDictionary *_procedures;
@@ -43,6 +46,7 @@
     NSMutableDictionary *_defaultTypes;
 }
 @property (atomic) BOOL stopped;
+@property (atomic) BOOL tracing;
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform;
 - (BOOL)runSource:(NSString *)source error:(NSError **)error;
 @end

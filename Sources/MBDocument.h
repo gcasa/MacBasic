@@ -3,7 +3,7 @@
 
 @class MBCanvasView;
 
-@interface MBDocument : NSDocument <MBPlatform, NSTextViewDelegate> {
+@interface MBDocument : NSDocument <MBPlatform, NSTextViewDelegate, NSToolbarDelegate> {
     NSTextView *_editor;
     NSTextView *_output;
     MBInterpreter *_interpreter;
@@ -15,6 +15,9 @@
     NSInteger _lastMenuItem;
     NSString *_sourceBeforeWindow;
     BOOL _programRunning;
+    BOOL _tracePaused;
+    NSUInteger _pendingTraceSteps;
+    NSCondition *_traceCondition;
     BOOL _closingDocument;
 }
 - (void)compileDocument:(id)sender;

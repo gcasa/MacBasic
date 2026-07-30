@@ -254,7 +254,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @end
 
 @implementation MBInterpreter
-@synthesize stopped=_stopped, platform=_platform, lines=_lines, procedures=_procedures;
+@synthesize stopped=_stopped, tracing=_tracing, platform=_platform, lines=_lines, procedures=_procedures;
 @synthesize dataItems=_dataItems, dataLabels=_dataLabels, dataIndex=_dataIndex, optionBase=_optionBase;
 @synthesize files=_files, labelLines=_labelLines, areaPoints=_areaPoints, waveforms=_waveforms, memory=_memory;
 @synthesize errorHandlerLine=_errorHandlerLine, currentLine=_currentLine, faultLine=_faultLine;
@@ -325,7 +325,6 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
     NSTimeInterval timerInterval=0,timerNext=0;NSNumber *timerTarget=nil;BOOL timerEnabled=NO;
     NSNumber *mouseTarget=nil,*keyTarget=nil,*menuTarget=nil,*collisionTarget=nil;BOOL previousMouse=NO,menuEnabled=NO,previousCollision=NO;
     for(NSUInteger pc=start;pc<end&&!self.stopped;pc++){
-        self.currentLine=pc;
         for(NSMutableDictionary *object in self.objects.allValues)if([MB_GET(object,@"MOVING")boolValue]){
             MB_SET(object,@"VX",@([MB_GET(object,@"VX")doubleValue]+[MB_GET(object,@"AX")doubleValue]));
             MB_SET(object,@"VY",@([MB_GET(object,@"VY")doubleValue]+[MB_GET(object,@"AY")doubleValue]));
@@ -347,10 +346,14 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             NSRect br=NSMakeRect([MB_GET(b,@"X")doubleValue],[MB_GET(b,@"Y")doubleValue],MAX(1,[MB_GET(b,@"W")doubleValue]),MAX(1,[MB_GET(b,@"H")doubleValue]));
             if(NSIntersectsRect(ar,br)){collisionNow=YES;break;}}
         if(collisionTarget&&collisionNow&&!previousCollision){[gosubStack addObject:@(pc-1)];pc=collisionTarget.unsignedIntegerValue;}previousCollision=collisionNow;
+        self.currentLine=pc;
         NSString *raw=MBTrim(MB_GET(self.lines,pc)); NSString *u=[raw uppercaseString];
         if(!raw.length||[raw hasPrefix:@"'"]||[u hasPrefix:@"REM "])continue;
         if([raw hasSuffix:@":"])continue;
         if([u hasPrefix:@"DATA"]&& (u.length==4||[u characterAtIndex:4]==' '))continue;
+        if(self.tracing&&[self.platform respondsToSelector:@selector(traceLine:)])
+            [self.platform traceLine:pc];
+        if(self.stopped)break;
         if([u hasPrefix:@"OPTION BASE "]){
             NSInteger base=[[self evaluate:[raw substringFromIndex:12] variables:vars]integerValue];
             if(base!=0&&base!=1){if(error)*error=[self err:@"OPTION BASE must be 0 or 1" line:pc];return NO;}

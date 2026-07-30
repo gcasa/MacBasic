@@ -34,14 +34,14 @@ ifeq ($(shell uname),Darwin)
 	cp $(BUILD)/$(APP) $(BUILD)/$(APP).app/Contents/MacOS/
 	cp Resources/Info.plist $(BUILD)/$(APP).app/Contents/
 	cp Resources/MacBasic.icns Resources/MacBasicIcon.png Resources/MacBasicDocument.icns Resources/MacBasicDocumentIcon.png $(BUILD)/$(APP).app/Contents/Resources/
-	cp Examples/Welcome.bas Examples/Drawing.bas $(BUILD)/$(APP).app/Contents/Resources/
+	cp Examples/Welcome.bas Examples/Drawing.bas Examples/Paraboloid3D.bas $(BUILD)/$(APP).app/Contents/Resources/
 else
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Resources
 	cp $(BUILD)/$(APP) $(APP_EXECUTABLE)
 	cp Resources/Info-gnustep.plist $(APP_BUNDLE)/Resources/
 	cp Resources/MacBasicIcon.png Resources/MacBasicDocumentIcon.png $(APP_BUNDLE)/Resources/
-	cp Examples/Welcome.bas Examples/Drawing.bas $(APP_BUNDLE)/Resources/
+	cp Examples/Welcome.bas Examples/Drawing.bas Examples/Paraboloid3D.bas $(APP_BUNDLE)/Resources/
 endif
 
 test: $(BUILD)/$(APP)
