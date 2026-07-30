@@ -7,11 +7,17 @@ ifeq ($(shell uname),Darwin)
   OBJCFLAGS=-fobjc-arc -fmodules -Wall -Wextra -Wno-unused-parameter
   LIBS=-framework Cocoa
   APP_EXECUTABLE=$(APP_BUNDLE)/Contents/MacOS/$(APP)
+  COMPILED_APP_EXECUTABLE=$(BUILD)/CompiledLanguage.app/Contents/MacOS/CompiledLanguage
+  COMPILED_APP_INFO=$(BUILD)/CompiledLanguage.app/Contents/Info.plist
+  COMPILED_APP_ICON=$(BUILD)/CompiledLanguage.app/Contents/Resources/MacBasic.icns
 else
   GCC_OBJC_INCLUDE=$(shell gcc -print-file-name=include)
   OBJCFLAGS=$(shell gnustep-config --objc-flags) -I$(GCC_OBJC_INCLUDE) -Wall -Wextra
   LIBS=$(shell gnustep-config --gui-libs)
   APP_EXECUTABLE=$(APP_BUNDLE)/$(APP)
+  COMPILED_APP_EXECUTABLE=$(BUILD)/CompiledLanguage.app/CompiledLanguage
+  COMPILED_APP_INFO=$(BUILD)/CompiledLanguage.app/Resources/Info-gnustep.plist
+  COMPILED_APP_ICON=$(BUILD)/CompiledLanguage.app/Resources/MacBasicIcon.png
 endif
 
 .PHONY: all app clean test test-gnustep-docker
@@ -41,8 +47,13 @@ endif
 test: $(BUILD)/$(APP)
 	$(BUILD)/$(APP) Tests/language.bas | diff -u Tests/language.expected -
 	$(BUILD)/$(APP) Tests/compatibility.bas | diff -u Tests/compatibility.expected -
-	$(BUILD)/$(APP) --compile Tests/language.bas $(BUILD)/language-compiled
+	$(BUILD)/$(APP) --compile-tool Tests/language.bas $(BUILD)/language-compiled
 	$(BUILD)/language-compiled --console | diff -u Tests/language.expected -
+	$(BUILD)/$(APP) --compile-app Tests/language.bas $(BUILD)/CompiledLanguage.app
+	test -x $(COMPILED_APP_EXECUTABLE)
+	test -f $(COMPILED_APP_INFO)
+	test -f $(COMPILED_APP_ICON)
+	$(COMPILED_APP_EXECUTABLE) --console | diff -u Tests/language.expected -
 
 test-gnustep-docker:
 	docker build -f Tests/Dockerfile.gnustep -t macbasic-gnustep-check .

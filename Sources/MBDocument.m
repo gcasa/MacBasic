@@ -252,8 +252,45 @@ static NSColor *MBColor(id value) {
     [self performSelector:@selector(run:) withObject:nil afterDelay:0];
 }
 - (void)compileDocument:(id)sender {
+    NSAlert *kindAlert=[NSAlert new];
+    kindAlert.messageText=@"Choose a Build Type";
+    kindAlert.informativeText=@"An application opens with the MacBasic window environment. A tool runs from a terminal.";
+    [kindAlert addButtonWithTitle:@"Build Application"];
+    [kindAlert addButtonWithTitle:@"Build Tool"];
+    [kindAlert addButtonWithTitle:@"Cancel"];
+    NSInteger kind=[kindAlert runModal];
+    if(kind==NSAlertThirdButtonReturn)return;
+    BOOL buildApplication=kind==NSAlertFirstButtonReturn;
+    NSString *iconPath=nil;
+    if(buildApplication){
+        NSAlert *iconAlert=[NSAlert new];
+        iconAlert.messageText=@"Application Icon";
+        iconAlert.informativeText=@"Choose an icon file, or let MacBasic include its generic application icon.";
+        [iconAlert addButtonWithTitle:@"Choose Icon…"];
+        [iconAlert addButtonWithTitle:@"Use Generic Icon"];
+        [iconAlert addButtonWithTitle:@"Cancel"];
+        NSInteger iconChoice=[iconAlert runModal];
+        if(iconChoice==NSAlertThirdButtonReturn)return;
+        if(iconChoice==NSAlertFirstButtonReturn){
+            NSOpenPanel *iconPanel=[NSOpenPanel openPanel];
+#if defined(GNUSTEP)
+            NSArray *types=@[@"png",@"tiff",@"icns"];
+#else
+            NSArray *types=@[@"icns"];
+#endif
+            if([iconPanel respondsToSelector:@selector(setAllowedFileTypes:)])
+                [iconPanel performSelector:@selector(setAllowedFileTypes:) withObject:types];
+#if defined(GNUSTEP)
+            if([iconPanel runModal]!=NSOKButton)return;
+#else
+            if([iconPanel runModal]!=NSModalResponseOK)return;
+#endif
+            iconPath=iconPanel.URL.path;
+        }
+    }
     NSSavePanel *panel=[NSSavePanel savePanel];
-    NSString *name=self.displayName.length?[[self.displayName stringByDeletingPathExtension]stringByAppendingString:@"-compiled"]:@"MacBasicProgram";
+    NSString *base=self.displayName.length?[self.displayName stringByDeletingPathExtension]:@"MacBasicProgram";
+    NSString *name=buildApplication?[base stringByAppendingPathExtension:@"app"]:[base stringByAppendingString:@"-compiled"];
     if([panel respondsToSelector:@selector(setNameFieldStringValue:)])
         [panel performSelector:@selector(setNameFieldStringValue:) withObject:name];
 #if defined(GNUSTEP)
@@ -263,8 +300,14 @@ static NSColor *MBColor(id value) {
 #endif
     NSError *error=nil;
     NSString *source=self.editor?self.editor.string:self.sourceBeforeWindow;
-    if(MBCompileSource(source,panel.URL.path,&error))
-        [self writeText:[NSString stringWithFormat:@"Compiled executable: %@\n",panel.URL.path]];
+    NSString *outputPath=panel.URL.path;
+    if(buildApplication&&[[outputPath pathExtension]caseInsensitiveCompare:@"app"]!=NSOrderedSame)
+        outputPath=[outputPath stringByAppendingPathExtension:@"app"];
+    BOOL ok=buildApplication?MBCompileApplication(source,outputPath,iconPath,&error)
+                            :MBCompileSource(source,outputPath,&error);
+    if(ok)
+        [self writeText:[NSString stringWithFormat:@"Compiled %@: %@\n",
+            buildApplication?@"application":@"tool",outputPath]];
     else
         [self writeText:[NSString stringWithFormat:@"Compile error: %@\n",error.localizedDescription]];
 }

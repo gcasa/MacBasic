@@ -59,11 +59,17 @@
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if(argc==4&&strcmp(argv[1],"--compile")==0){
+        BOOL compileTool=argc==4&&(strcmp(argv[1],"--compile")==0||strcmp(argv[1],"--compile-tool")==0);
+        BOOL compileApp=(argc==4||argc==5)&&strcmp(argv[1],"--compile-app")==0;
+        if(compileTool||compileApp){
             NSError *error=nil;
             NSString *source=[NSString stringWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]
                 encoding:NSUTF8StringEncoding error:&error];
-            if(!source||!MBCompileSource(source,[NSString stringWithUTF8String:argv[3]],&error)){
+            NSString *output=[NSString stringWithUTF8String:argv[3]];
+            NSString *icon=compileApp&&argc==5?[NSString stringWithUTF8String:argv[4]]:nil;
+            BOOL ok=source&&(compileApp?MBCompileApplication(source,output,icon,&error)
+                                          :MBCompileSource(source,output,&error));
+            if(!ok){
                 fprintf(stderr,"%s\n",error.localizedDescription.UTF8String);return 1;
             }
             return 0;

@@ -83,14 +83,32 @@ Run a script without opening the editor:
 ./build/MacBasic Examples/Welcome.bas
 ```
 
-Compile a source document into a standalone executable with **File → Compile…**
-or the Compile button in the document window. The equivalent command-line form
-is:
+Compile a source document with **File → Compile…** or the Compile button in the
+document window. Choose either a native application wrapper or a standalone
+command-line tool. The equivalent command-line form for a tool is:
 
 ```sh
-./build/MacBasic --compile program.bas program
+./build/MacBasic --compile-tool program.bas program
 ./program
 ```
+
+Build a native application wrapper with the generic MacBasic icon:
+
+```sh
+./build/MacBasic --compile-app program.bas Program.app
+```
+
+An optional final argument supplies a custom icon (`.icns` on macOS; `.png`,
+`.tiff`, or `.icns` on GNUstep):
+
+```sh
+./build/MacBasic --compile-app program.bas Program.app MyProgram.icns
+```
+
+The IDE's Compile command offers the same choice between an application and a
+command-line tool. For applications, it then lets you choose an icon or use the
+generic MacBasic icon. `--compile` remains available as an alias for
+`--compile-tool`.
 
 The output contains both the MacBasic runtime and a private copy of the source,
 so the original `.bas` file is not required when the compiled program runs.
