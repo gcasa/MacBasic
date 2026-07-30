@@ -83,6 +83,23 @@ Run a script without opening the editor:
 ./build/MacBasic Examples/Welcome.bas
 ```
 
+Compile a source document into a standalone executable with **File → Compile…**
+or the Compile button in the document window. The equivalent command-line form
+is:
+
+```sh
+./build/MacBasic --compile program.bas program
+./program
+```
+
+The output contains both the MacBasic runtime and a private copy of the source,
+so the original `.bas` file is not required when the compiled program runs.
+Compiled programs start the native AppKit or GNUstep host, automatically run
+their embedded source, and support `WINDOW`, `VIEW`, drawing, sound, and input
+like the IDE. Compile on the operating system where the resulting executable
+will be used. Pass `--console` to a compiled program only when headless
+execution is desired; native window operations are ignored in that mode.
+
 ## Language
 
 - Variables without a type declaration remain dynamically typed.

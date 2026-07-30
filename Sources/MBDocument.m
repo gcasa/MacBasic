@@ -1,4 +1,5 @@
 #import "MBDocument.h"
+#import "MBCompiler.h"
 
 #define MB_KEY(value) _Generic((value), \
     char: @((long long)(value)), signed char: @((long long)(value)), unsigned char: @((unsigned long long)(value)), \
@@ -178,6 +179,7 @@ static NSColor *MBColor(id value) {
     NSView *content=window.contentView;[content addSubview:editor];[content addSubview:output];
     [content addSubview:[self button:@"Run" action:@selector(run:) x:10]];
     [content addSubview:[self button:@"Stop" action:@selector(stop:) x:96]];
+    [content addSubview:[self button:@"Compile" action:@selector(compileDocument:) x:182]];
     self.editor.string=self.sourceBeforeWindow?:@"";self.output.string=@"Ready.\n";
     [self highlightSyntax];
     [self addWindowController:[[NSWindowController alloc]initWithWindow:window]];
@@ -243,6 +245,29 @@ static NSColor *MBColor(id value) {
 }
 - (void)programDidFinish {self.programRunning=NO;}
 - (void)stop:(id)sender {self.interpreter.stopped=YES;[self writeText:@"Program stopped.\n"];}
+- (void)runCompiledSource:(NSString *)source {
+    self.sourceBeforeWindow=source;
+    [self makeWindowControllers];
+    [self showWindows];
+    [self performSelector:@selector(run:) withObject:nil afterDelay:0];
+}
+- (void)compileDocument:(id)sender {
+    NSSavePanel *panel=[NSSavePanel savePanel];
+    NSString *name=self.displayName.length?[[self.displayName stringByDeletingPathExtension]stringByAppendingString:@"-compiled"]:@"MacBasicProgram";
+    if([panel respondsToSelector:@selector(setNameFieldStringValue:)])
+        [panel performSelector:@selector(setNameFieldStringValue:) withObject:name];
+#if defined(GNUSTEP)
+    if([panel runModal]!=NSOKButton)return;
+#else
+    if([panel runModal]!=NSModalResponseOK)return;
+#endif
+    NSError *error=nil;
+    NSString *source=self.editor?self.editor.string:self.sourceBeforeWindow;
+    if(MBCompileSource(source,panel.URL.path,&error))
+        [self writeText:[NSString stringWithFormat:@"Compiled executable: %@\n",panel.URL.path]];
+    else
+        [self writeText:[NSString stringWithFormat:@"Compile error: %@\n",error.localizedDescription]];
+}
 - (void)appendOutput:(NSString *)text {
     [self.output.textStorage appendAttributedString:[[NSAttributedString alloc]initWithString:text
         attributes:@{NSForegroundColorAttributeName:[NSColor blackColor],

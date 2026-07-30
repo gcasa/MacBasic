@@ -31,6 +31,9 @@
     [file addItemWithTitle:@"Close" action:@selector(performClose:) keyEquivalent:@"w"];
     [file addItemWithTitle:@"Save" action:@selector(saveDocument:) keyEquivalent:@"s"];
     [file addItemWithTitle:@"Save As…" action:@selector(saveDocumentAs:) keyEquivalent:@"S"];
+    [file addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *compile=(NSMenuItem *)[file addItemWithTitle:@"Compile…" action:@selector(compileDocument:) keyEquivalent:@"k"];
+    compile.target=self;
     fileItem.submenu=file;
 
     NSMenu *edit=[[NSMenu alloc]initWithTitle:@"Edit"];
@@ -48,6 +51,11 @@
     [bar addItem:[NSMenuItem separatorItem]];
     [bar addItemWithTitle:@"Quit" action:@selector(terminate:) keyEquivalent:@"q"];
 #endif
+}
+- (void)compileDocument:(id)sender {
+    id document=[[NSDocumentController sharedDocumentController]currentDocument];
+    if([document respondsToSelector:@selector(compileDocument:)])
+        [document performSelector:@selector(compileDocument:) withObject:sender];
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     [self installMenus];

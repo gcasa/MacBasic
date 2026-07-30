@@ -1,6 +1,6 @@
 APP=MacBasic
 BUILD=build
-SOURCES=Sources/main.m Sources/MBInterpreter.m Sources/MBAppDelegate.m Sources/MBDocument.m
+SOURCES=Sources/main.m Sources/MBCompiler.m Sources/MBInterpreter.m Sources/MBAppDelegate.m Sources/MBDocument.m
 APP_BUNDLE=$(BUILD)/$(APP).app
 
 ifeq ($(shell uname),Darwin)
@@ -17,7 +17,7 @@ endif
 .PHONY: all app clean test test-gnustep-docker
 all: app
 
-$(BUILD)/$(APP): $(SOURCES) Sources/MBInterpreter.h Sources/MBAppDelegate.h Sources/MBDocument.h
+$(BUILD)/$(APP): $(SOURCES) Sources/MBCompiler.h Sources/MBInterpreter.h Sources/MBAppDelegate.h Sources/MBDocument.h
 	mkdir -p $(BUILD)
 	clang $(OBJCFLAGS) -o $@ $(SOURCES) $(LIBS)
 
@@ -41,6 +41,8 @@ endif
 test: $(BUILD)/$(APP)
 	$(BUILD)/$(APP) Tests/language.bas | diff -u Tests/language.expected -
 	$(BUILD)/$(APP) Tests/compatibility.bas | diff -u Tests/compatibility.expected -
+	$(BUILD)/$(APP) --compile Tests/language.bas $(BUILD)/language-compiled
+	$(BUILD)/language-compiled --console | diff -u Tests/language.expected -
 
 test-gnustep-docker:
 	docker build -f Tests/Dockerfile.gnustep -t macbasic-gnustep-check .

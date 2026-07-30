@@ -1,5 +1,7 @@
 #import <AppKit/AppKit.h>
 #import "MBAppDelegate.h"
+#import "MBCompiler.h"
+#import "MBDocument.h"
 #import "MBInterpreter.h"
 
 @interface MBConsolePlatform : NSObject <MBPlatform> @end
@@ -36,8 +38,52 @@
 }
 @end
 
+@interface MBCompiledAppDelegate : NSObject <NSApplicationDelegate> {
+    NSString *_source;
+    MBDocument *_document;
+}
+@property (copy) NSString *source;
+@property (retain) MBDocument *document;
+@end
+@implementation MBCompiledAppDelegate
+@synthesize source=_source, document=_document;
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    self.document=[[MBDocument alloc]init];
+    [self.document runCompiledSource:self.source];
+#if !defined(GNUSTEP)
+    [NSApp activateIgnoringOtherApps:YES];
+#endif
+}
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {return YES;}
+@end
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
+        if(argc==4&&strcmp(argv[1],"--compile")==0){
+            NSError *error=nil;
+            NSString *source=[NSString stringWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]
+                encoding:NSUTF8StringEncoding error:&error];
+            if(!source||!MBCompileSource(source,[NSString stringWithUTF8String:argv[3]],&error)){
+                fprintf(stderr,"%s\n",error.localizedDescription.UTF8String);return 1;
+            }
+            return 0;
+        }
+        NSError *embeddedError=nil;
+        NSString *embeddedSource=MBEmbeddedSource(&embeddedError);
+        if(embeddedError){fprintf(stderr,"%s\n",embeddedError.localizedDescription.UTF8String);return 1;}
+        if(embeddedSource){
+            if(argc>1&&strcmp(argv[1],"--console")==0){
+                NSError *error=nil;
+                MBInterpreter *basic=[[MBInterpreter alloc]initWithPlatform:[MBConsolePlatform new]];
+                if(![basic runSource:embeddedSource error:&error]){
+                    fprintf(stderr,"%s\n",error.localizedDescription.UTF8String);return 1;
+                }
+                return 0;
+            }
+            NSApplication *app=[NSApplication sharedApplication];
+            MBCompiledAppDelegate *delegate=[MBCompiledAppDelegate new];
+            delegate.source=embeddedSource;app.delegate=delegate;[app run];return 0;
+        }
         if (argc > 1) {
             NSString *path = [NSString stringWithUTF8String:argv[1]];
             NSError *error = nil;

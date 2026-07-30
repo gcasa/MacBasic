@@ -17,4 +17,6 @@
     BOOL _programRunning;
     BOOL _closingDocument;
 }
+- (void)compileDocument:(id)sender;
+- (void)runCompiledSource:(NSString *)source;
 @end
