@@ -76,6 +76,11 @@ static NSArray *MBCommandOutput(NSString *path,NSArray *arguments) {
     NSString *text=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding]?:@"";
     return [text componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
+
+static NSArray *MBGNUstepConfigOutput(NSString *option) {
+    NSArray *output=MBCommandOutput(@"/usr/bin/env",@[@"gnustep-config",option]);
+    return output.count>1?output:MBCommandOutput(@"/usr/bin/gnustep-config",@[option]);
+}
 #endif
 
 static BOOL MBRunClang(NSString *source,NSString *outputPath,BOOL application,NSError **error) {
@@ -91,7 +96,13 @@ static BOOL MBRunClang(NSString *source,NSString *outputPath,BOOL application,NS
         writeToFile:main options:NSDataWritingAtomic error:error])return NO;
     NSMutableArray *arguments=[NSMutableArray array];
 #if defined(GNUSTEP)
-    for(NSString *item in MBCommandOutput(@"/usr/bin/gnustep-config",@[@"--objc-flags"]))if(item.length)[arguments addObject:item];
+    for(NSString *item in MBGNUstepConfigOutput(@"--objc-flags"))if(item.length)[arguments addObject:item];
+    NSArray *gccInclude=MBCommandOutput(@"/usr/bin/env",@[@"gcc",@"-print-file-name=include"]);
+    for(NSString *item in gccInclude)if(item.length){
+        [arguments addObject:@"-I"];
+        [arguments addObject:item];
+        break;
+    }
 #else
     [arguments addObjectsFromArray:@[@"-fobjc-arc",@"-fmodules"]];
 #endif
@@ -99,7 +110,7 @@ static BOOL MBRunClang(NSString *source,NSString *outputPath,BOOL application,NS
     if(![[NSFileManager defaultManager]fileExistsAtPath:header])header=@"Sources/MBInterpreter.h";
     [arguments addObjectsFromArray:@[@"-I",[header stringByDeletingLastPathComponent],@"-o",outputPath,main,library]];
 #if defined(GNUSTEP)
-    for(NSString *item in MBCommandOutput(@"/usr/bin/gnustep-config",@[@"--gui-libs"]))if(item.length)[arguments addObject:item];
+    for(NSString *item in MBGNUstepConfigOutput(@"--gui-libs"))if(item.length)[arguments addObject:item];
     [arguments addObject:@"-lsqlite3"];
 #else
     [arguments addObjectsFromArray:@[@"-framework",@"Cocoa",@"-lsqlite3"]];
