@@ -44,6 +44,11 @@
     NSNumber *_resumeTarget;
     NSMutableDictionary *_objects;
     NSMutableDictionary *_defaultTypes;
+    NSMutableDictionary *_pointers;
+    NSUInteger _nextPointer;
+    NSMutableDictionary *_databases;
+    NSMutableDictionary *_interfaces;
+    NSMutableArray *_threadTasks;
 }
 @property (atomic) BOOL stopped;
 @property (atomic) BOOL tracing;

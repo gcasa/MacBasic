@@ -2,7 +2,6 @@
 #include <sys/stat.h>
 
 static NSString *const MBCompilerErrorDomain=@"MacBasic.Compiler";
-static const char MBSourceMarker[]="\n__MACBASIC_EMBEDDED_SOURCE_V1__\n";
 
 static NSString *MBExecutablePath(void) {
     NSString *path=[[NSBundle mainBundle]executablePath];
@@ -12,45 +11,118 @@ static NSString *MBExecutablePath(void) {
     return [[arguments objectAtIndex:0]stringByStandardizingPath];
 }
 
-static NSRange MBPayloadRange(NSData *data) {
-    const unsigned char *bytes=[data bytes];
-    NSUInteger length=[data length],markerLength=sizeof(MBSourceMarker)-1,footerLength=markerLength+16;
-    if(length<footerLength)return NSMakeRange(NSNotFound,0);
-    NSUInteger markerOffset=length-footerLength;
-    if(memcmp(bytes+markerOffset,MBSourceMarker,markerLength)!=0)return NSMakeRange(NSNotFound,0);
-    char sizeText[17]={0};
-    memcpy(sizeText,bytes+markerOffset+markerLength,16);
-    char *end=NULL;
-    unsigned long long sourceLength=strtoull(sizeText,&end,16);
-    if(end!=sizeText+16||sourceLength>markerOffset)return NSMakeRange(NSNotFound,0);
-    return NSMakeRange(markerOffset-(NSUInteger)sourceLength,(NSUInteger)sourceLength+footerLength);
+static NSString *MBRuntimeLibraryPath(void) {
+    NSString *executable=MBExecutablePath();
+    NSArray *candidates=@[
+        [[[NSBundle mainBundle]resourcePath]?:@"" stringByAppendingPathComponent:@"libMacBasicRuntime.a"],
+        [[executable stringByDeletingLastPathComponent]stringByAppendingPathComponent:@"libMacBasicRuntime.a"],
+        [@"build" stringByAppendingPathComponent:@"libMacBasicRuntime.a"]
+    ];
+    for(NSString *path in candidates)
+        if(path.length&&[[NSFileManager defaultManager]fileExistsAtPath:path])return [path stringByStandardizingPath];
+    return nil;
+}
+
+static NSString *MBCStringData(NSString *source) {
+    NSData *data=[source dataUsingEncoding:NSUTF8StringEncoding];
+    const unsigned char *bytes=data.bytes;
+    NSMutableString *result=[NSMutableString stringWithString:@"{"];
+    for(NSUInteger i=0;i<data.length;i++){
+        if(i)[result appendString:@","];
+        [result appendFormat:@"%u",(unsigned)bytes[i]];
+    }
+    [result appendString:@",0}"];
+    return result;
+}
+
+static NSString *MBGeneratedMain(NSString *source,BOOL application) {
+    NSString *bytes=MBCStringData(source);
+    NSString *console=
+          @"@interface C:NSObject<MBPlatform>@end\n@implementation C\n"
+          "-(void)writeText:(NSString*)s{fputs(s.UTF8String,stdout);fflush(stdout);}"
+          "-(void)clearText{}-(NSString*)readInput:(NSString*)p{[self writeText:p];char b[4096]={0};return fgets(b,sizeof b,stdin)?[NSString stringWithUTF8String:b]:@\"\";}"
+          "-(void)openWindowWithID:(NSInteger)i title:(NSString*)t width:(CGFloat)w height:(CGFloat)h x:(CGFloat)x y:(CGFloat)y{}"
+          "-(void)closeWindowWithID:(NSInteger)i{}-(void)addViewWithID:(NSInteger)v toWindowID:(NSInteger)i x:(CGFloat)x y:(CGFloat)y width:(CGFloat)w height:(CGFloat)h{}"
+          "-(void)drawCommand:(NSString*)c onViewID:(NSInteger)v arguments:(NSArray*)a{}-(void)playSound:(NSString*)n{}"
+          "-(void)playTone:(double)f duration:(double)d volume:(double)v voice:(NSInteger)i waveform:(NSInteger)w{}-(void)speakText:(NSString*)t{}-(void)stopSounds{}"
+          "-(void)beep{fputc('\\a',stderr);}-(id)inputValue:(NSString*)n argument:(NSInteger)a{return[n hasSuffix:@\"$\"]?@\"\":@0;}"
+          "-(void)setMenu:(NSInteger)m item:(NSInteger)i state:(NSInteger)s title:(NSString*)t{}-(NSInteger)menuValue:(NSInteger)w reset:(BOOL)r{return 0;}"
+          "-(void)runProcess:(NSString*)p arguments:(NSArray*)a{NSTask*t=[NSTask new];t.launchPath=p;t.arguments=a;[t launch];}@end\n";
+    NSString *run=@"static int R(void){@autoreleasepool{NSError*e=nil;MBInterpreter*b=[[MBInterpreter alloc]initWithPlatform:[C new]];"
+          "if(![b runSource:P() error:&e]){fprintf(stderr,\"%s\\n\",e.localizedDescription.UTF8String);return 1;}}return 0;}\n";
+    NSString *platform=application
+        ?[console stringByAppendingString:[run stringByAppendingString:
+          @"@interface MBDocument:NSDocument\n-(void)runCompiledSource:(NSString*)s;\n@end\n"
+          "BOOL MBCompileSource(NSString*s,NSString*p,NSError**e){return NO;}"
+          "BOOL MBCompileApplication(NSString*s,NSString*p,NSString*i,NSError**e){return NO;}\n"
+          "@interface D:NSObject<NSApplicationDelegate>{MBDocument*_d;}@end\n"
+          "@implementation D\n-(void)applicationDidFinishLaunching:(NSNotification*)n{_d=[MBDocument new];[_d runCompiledSource:P()];\n"
+          "#if !defined(GNUSTEP)\n[NSApp activateIgnoringOtherApps:YES];\n#endif\n}"
+          "-(BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)s{return YES;}@end\n"
+          "int main(int c,const char**v){if(c>1&&strcmp(v[1],\"--console\")==0)return R();"
+          "@autoreleasepool{NSApplication*a=[NSApplication sharedApplication];D*d=[D new];a.delegate=d;[a run];}return 0;}\n"]]
+        :[console stringByAppendingString:[run stringByAppendingString:@"int main(){return R();}\n"]];
+    return [NSString stringWithFormat:
+        @"#import <AppKit/AppKit.h>\n#import \"MBInterpreter.h\"\n"
+         "static const unsigned char S[]=%@;\nstatic NSString*P(void){return [[NSString alloc]initWithUTF8String:(const char*)S];}\n%@",
+        bytes,platform];
+}
+
+#if defined(GNUSTEP)
+static NSArray *MBCommandOutput(NSString *path,NSArray *arguments) {
+    NSTask *task=[NSTask new];NSPipe *pipe=[NSPipe pipe];task.launchPath=path;task.arguments=arguments;task.standardOutput=pipe;
+    @try{[task launch];[task waitUntilExit];}@catch(NSException *exception){return @[];}
+    NSData *data=[[pipe fileHandleForReading]readDataToEndOfFile];
+    NSString *text=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding]?:@"";
+    return [text componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+#endif
+
+static BOOL MBRunClang(NSString *source,NSString *outputPath,BOOL application,NSError **error) {
+    NSString *library=MBRuntimeLibraryPath();
+    if(!library){
+        if(error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey:
+            @"The MacBasic native support library could not be found. Rebuild MacBasic before compiling programs."}];
+        return NO;
+    }
+    NSString *temporary=[NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID]UUIDString]];
+    NSString *main=[temporary stringByAppendingPathExtension:@"m"];
+    if(![[MBGeneratedMain(source,application) dataUsingEncoding:NSUTF8StringEncoding]
+        writeToFile:main options:NSDataWritingAtomic error:error])return NO;
+    NSMutableArray *arguments=[NSMutableArray array];
+#if defined(GNUSTEP)
+    for(NSString *item in MBCommandOutput(@"/usr/bin/gnustep-config",@[@"--objc-flags"]))if(item.length)[arguments addObject:item];
+#else
+    [arguments addObjectsFromArray:@[@"-fobjc-arc",@"-fmodules"]];
+#endif
+    NSString *header=[[[NSBundle mainBundle]resourcePath]?:@"Sources" stringByAppendingPathComponent:@"MBInterpreter.h"];
+    if(![[NSFileManager defaultManager]fileExistsAtPath:header])header=@"Sources/MBInterpreter.h";
+    [arguments addObjectsFromArray:@[@"-I",[header stringByDeletingLastPathComponent],@"-o",outputPath,main,library]];
+#if defined(GNUSTEP)
+    for(NSString *item in MBCommandOutput(@"/usr/bin/gnustep-config",@[@"--gui-libs"]))if(item.length)[arguments addObject:item];
+    [arguments addObject:@"-lsqlite3"];
+#else
+    [arguments addObjectsFromArray:@[@"-framework",@"Cocoa",@"-lsqlite3"]];
+#endif
+    NSTask *task=[NSTask new];NSPipe *diagnostics=[NSPipe pipe];task.launchPath=@"/usr/bin/clang";task.arguments=arguments;
+    task.standardError=diagnostics;
+    @try{[task launch];[task waitUntilExit];}@catch(NSException *exception){
+        if(error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:2 userInfo:@{NSLocalizedDescriptionKey:exception.reason}];
+        [[NSFileManager defaultManager]removeItemAtPath:main error:NULL];return NO;
+    }
+    NSData *diagnosticData=[[diagnostics fileHandleForReading]readDataToEndOfFile];
+    [[NSFileManager defaultManager]removeItemAtPath:main error:NULL];
+    if(task.terminationStatus!=0){
+        NSString *message=[[NSString alloc]initWithData:diagnosticData encoding:NSUTF8StringEncoding];
+        if(error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:3 userInfo:@{NSLocalizedDescriptionKey:
+            message.length?message:@"Clang could not build the native program."}];
+        return NO;
+    }
+    return chmod(outputPath.fileSystemRepresentation,0755)==0;
 }
 
 BOOL MBCompileSource(NSString *source,NSString *outputPath,NSError **error) {
-    NSString *runtimePath=MBExecutablePath();
-    NSData *runtime=runtimePath?[NSData dataWithContentsOfFile:runtimePath]:nil;
-    NSData *program=[source dataUsingEncoding:NSUTF8StringEncoding];
-    if(!runtime||!program){
-        if(error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:1
-            userInfo:@{NSLocalizedDescriptionKey:@"The MacBasic runtime or source could not be read."}];
-        return NO;
-    }
-    NSRange oldPayload=MBPayloadRange(runtime);
-    if(oldPayload.location!=NSNotFound)
-        runtime=[runtime subdataWithRange:NSMakeRange(0,oldPayload.location)];
-    NSMutableData *compiled=[NSMutableData dataWithData:runtime];
-    [compiled appendData:program];
-    [compiled appendBytes:MBSourceMarker length:sizeof(MBSourceMarker)-1];
-    char sizeText[17]={0};
-    snprintf(sizeText,sizeof(sizeText),"%016llx",(unsigned long long)program.length);
-    [compiled appendBytes:sizeText length:16];
-    if(![compiled writeToFile:outputPath options:NSDataWritingAtomic error:error])return NO;
-    if(chmod([outputPath fileSystemRepresentation],0755)!=0){
-        if(error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:2
-            userInfo:@{NSLocalizedDescriptionKey:@"The output was written but could not be made executable."}];
-        return NO;
-    }
-    return YES;
+    return MBRunClang(source,outputPath,NO,error);
 }
 
 static NSString *MBGenericIconPath(void) {
@@ -102,7 +174,7 @@ BOOL MBCompileApplication(NSString *source,NSString *outputPath,NSString *iconPa
     if(![files createDirectoryAtPath:[executable stringByDeletingLastPathComponent]
         withIntermediateDirectories:YES attributes:nil error:error])return NO;
     if(![files createDirectoryAtPath:resources withIntermediateDirectories:YES attributes:nil error:error])return NO;
-    if(!MBCompileSource(source,executable,error))return NO;
+    if(!MBRunClang(source,executable,YES,error))return NO;
 
     NSString *chosenIcon=iconPath.length?iconPath:MBGenericIconPath();
     NSString *iconName=nil;
@@ -142,14 +214,5 @@ BOOL MBCompileApplication(NSString *source,NSString *outputPath,NSString *iconPa
 }
 
 NSString *MBEmbeddedSource(NSError **error) {
-    NSData *runtime=[NSData dataWithContentsOfFile:MBExecutablePath()];
-    NSRange payload=MBPayloadRange(runtime);
-    if(payload.location==NSNotFound)return nil;
-    NSUInteger footerLength=(sizeof(MBSourceMarker)-1)+16;
-    NSRange sourceRange=NSMakeRange(payload.location,payload.length-footerLength);
-    NSString *source=[[NSString alloc]initWithData:[runtime subdataWithRange:sourceRange]
-        encoding:NSUTF8StringEncoding];
-    if(!source&&error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:3
-        userInfo:@{NSLocalizedDescriptionKey:@"The embedded BASIC program is not valid UTF-8."}];
-    return source;
+    return nil;
 }

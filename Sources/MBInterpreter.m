@@ -1,4 +1,5 @@
 #import "MBInterpreter.h"
+#import <sqlite3.h>
 
 #if __has_feature(objc_arc)
 #define MB_WEAK __weak
@@ -106,6 +107,81 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @synthesize randomData=_randomData, recordLength=_recordLength, fields=_fields;
 @end
 
+@interface MBPointer : NSObject {
+    NSMutableDictionary *_variables;
+    NSString *_name;
+}
+@property (retain) NSMutableDictionary *variables;
+@property (copy) NSString *name;
+@end
+@implementation MBPointer
+@synthesize variables=_variables, name=_name;
+@end
+
+@interface MBLinkedList : NSObject {
+    NSMutableArray *_values;
+    NSInteger _index;
+}
+@property (retain) NSMutableArray *values;
+@property NSInteger index;
+@end
+@implementation MBLinkedList
+@synthesize values=_values, index=_index;
+- (instancetype)init {if((self=[super init])){_values=[NSMutableArray array];_index=-1;}return self;}
+@end
+
+@interface MBProcedureRef : NSObject {
+    NSString *_name;
+}
+@property (copy) NSString *name;
+@end
+@implementation MBProcedureRef
+@synthesize name=_name;
+@end
+
+@interface MBInterfaceInstance : NSObject {
+    NSString *_interfaceName;
+    NSMutableDictionary *_bindings;
+}
+@property (copy) NSString *interfaceName;
+@property (retain) NSMutableDictionary *bindings;
+@end
+@implementation MBInterfaceInstance
+@synthesize interfaceName=_interfaceName, bindings=_bindings;
+- (instancetype)init {if((self=[super init]))_bindings=[NSMutableDictionary dictionary];return self;}
+@end
+
+@interface MBThreadedValue : NSObject {
+    NSMutableDictionary *_values;
+    id _defaultValue;
+}
+@property (retain) NSMutableDictionary *values;
+@property (retain) id defaultValue;
+- (id)value;
+- (void)setValue:(id)value;
+@end
+@implementation MBThreadedValue
+@synthesize values=_values, defaultValue=_defaultValue;
+- (instancetype)init {if((self=[super init]))_values=[NSMutableDictionary dictionary];return self;}
+- (NSString *)key {return [NSString stringWithFormat:@"%p",[NSThread currentThread]];}
+- (id)value {@synchronized(self){return MB_GET(self.values,[self key])?:self.defaultValue?:@0;}}
+- (void)setValue:(id)value {@synchronized(self){MB_SET(self.values,[self key],value?:@0);}}
+@end
+
+@interface MBDatabase : NSObject {
+@public sqlite3 *connection;
+@public sqlite3_stmt *statement;
+}
+@end
+@implementation MBDatabase
+- (void)dealloc {
+    if(statement)sqlite3_finalize(statement);if(connection)sqlite3_close(connection);
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
+}
+@end
+
 @class MBInterpreter;
 @interface MBExpr : NSObject {
     NSArray *_tokens;
@@ -143,10 +219,16 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @property (retain) NSNumber *resumeTarget;
 @property (retain) NSMutableDictionary<NSNumber *, NSMutableDictionary *> *objects;
 @property (retain) NSMutableDictionary<NSString *, NSString *> *defaultTypes;
+@property (retain) NSMutableDictionary<NSNumber *, MBPointer *> *pointers;
+@property NSUInteger nextPointer;
+@property (retain) NSMutableDictionary<NSNumber *, MBDatabase *> *databases;
+@property (retain) NSMutableDictionary<NSString *, NSSet *> *interfaces;
+@property (retain) NSMutableArray<NSMutableDictionary *> *threadTasks;
 - (id)evaluate:(NSString *)text variables:(NSMutableDictionary *)vars;
 - (id)call:(NSString *)name args:(NSArray *)args variables:(NSMutableDictionary *)caller error:(NSError **)error;
 - (id)coerceValue:(id)value forName:(NSString *)name;
 - (id)defaultValueForName:(NSString *)name;
+- (void)runThreadTask:(NSMutableDictionary *)task;
 @end
 
 @implementation MBExpr
@@ -205,7 +287,9 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
     }
     if([@[@"DATE$",@"TIME$",@"TIMER",@"RND",@"INKEY$"] containsObject:[t uppercaseString]])
         return [self.owner call:t args:@[] variables:self.vars error:NULL]?:@0;
-    return MB_GET(self.vars,[t uppercaseString]) ?: [self.owner defaultValueForName:t];
+    id value=MB_GET(self.vars,[t uppercaseString]);
+    if([value isKindOfClass:[MBThreadedValue class]])value=[value value];
+    return value ?: [self.owner defaultValueForName:t];
 }
 - (id)power {
     id v=[self primary];if([self take:@"^"])v=@(pow([v doubleValue],[[self power]doubleValue]));return v;
@@ -259,6 +343,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @synthesize files=_files, labelLines=_labelLines, areaPoints=_areaPoints, waveforms=_waveforms, memory=_memory;
 @synthesize errorHandlerLine=_errorHandlerLine, currentLine=_currentLine, faultLine=_faultLine;
 @synthesize resumeTarget=_resumeTarget, objects=_objects, defaultTypes=_defaultTypes;
+@synthesize pointers=_pointers, nextPointer=_nextPointer, databases=_databases, interfaces=_interfaces, threadTasks=_threadTasks;
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform {
     if ((self=[super init])) { self.platform=platform; _procedures=[[NSMutableDictionary alloc]init]; } return self;
 }
@@ -369,6 +454,95 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
                 for(NSString *b in bounds)[dims addObject:@([[self evaluate:b variables:vars]integerValue])];
                 MBArray *array=[MBArray new];array.lowerBound=self.optionBase;array.dimensions=dims;array.elementType=[self typeForName:name];MB_SET(vars,name,array);
             }continue;
+        }
+        if([u hasPrefix:@"THREADED "]){
+            for(NSString *item in [self parts:[raw substringFromIndex:9]]){
+                NSString *name=[[MBTrim(item)uppercaseString]copy];MBThreadedValue *value=[MBThreadedValue new];
+                value.defaultValue=[self defaultValueForName:name];[value setValue:value.defaultValue];MB_SET(vars,name,value);
+            }continue;
+        }
+        if([u hasPrefix:@"POINTER "]&&[u containsString:@" TO "]){
+            NSRange to=[u rangeOfString:@" TO "];NSString *pointerName=[[MBTrim([raw substringWithRange:NSMakeRange(8,to.location-8)])uppercaseString]copy];
+            NSString *targetName=[[MBTrim([raw substringFromIndex:NSMaxRange(to)])uppercaseString]copy];
+            MBPointer *pointer=[MBPointer new];pointer.variables=vars;pointer.name=targetName;NSNumber *handle=@(++self.nextPointer);
+            MB_SET(self.pointers,handle,pointer);MB_SET(vars,pointerName,handle);continue;
+        }
+        if([u hasPrefix:@"POINTER SET "]){
+            NSArray *p=[self parts:[raw substringFromIndex:12]];if(p.count!=2){if(error)*error=[self err:@"POINTER SET needs a pointer and value" line:pc];return NO;}
+            MBPointer *pointer=MB_GET(self.pointers,@([[self evaluate:MB_GET(p,0)variables:vars]integerValue]));
+            if(!pointer){if(error)*error=[self err:@"Invalid pointer" line:pc];return NO;}
+            id old=MB_GET(pointer.variables,pointer.name);
+            id value=[self coerceValue:[self evaluate:MB_GET(p,1)variables:vars] forName:pointer.name];
+            if([old isKindOfClass:[MBThreadedValue class]])[old setValue:value];else MB_SET(pointer.variables,pointer.name,value);continue;
+        }
+        if([u hasPrefix:@"LIST CREATE "]){
+            NSString *name=[[MBTrim([raw substringFromIndex:12])uppercaseString]copy];MB_SET(vars,name,[MBLinkedList new]);continue;
+        }
+        if([u hasPrefix:@"LIST ADD "]||[u hasPrefix:@"LIST SET "]){
+            BOOL add=[u hasPrefix:@"LIST ADD "];NSArray *p=[self parts:[raw substringFromIndex:9]];
+            MBLinkedList *list=p.count?MB_GET(vars,[MB_GET(p,0)uppercaseString]):nil;
+            if(![list isKindOfClass:[MBLinkedList class]]||p.count!=2){if(error)*error=[self err:@"LIST requires a created list and value" line:pc];return NO;}
+            id value=[self evaluate:MB_GET(p,1)variables:vars]?:@0;
+            if(add){[list.values addObject:value];list.index=list.values.count-1;}
+            else if(list.index>=0&&list.index<(NSInteger)list.values.count)MB_SET(list.values,list.index,value);
+            continue;
+        }
+        if([u hasPrefix:@"LIST FIRST "]||[u hasPrefix:@"LIST NEXT "]||[u hasPrefix:@"LIST CLEAR "]){
+            NSUInteger offset=[u hasPrefix:@"LIST NEXT "]?10:11;
+            NSString *name=[[MBTrim([raw substringFromIndex:offset])uppercaseString]copy];MBLinkedList *list=MB_GET(vars,name);
+            if(![list isKindOfClass:[MBLinkedList class]]){if(error)*error=[self err:@"Unknown linked list" line:pc];return NO;}
+            if([u hasPrefix:@"LIST FIRST "])list.index=list.values.count?0:-1;
+            else if([u hasPrefix:@"LIST NEXT "])list.index=MIN((NSInteger)list.values.count,list.index+1);
+            else {[list.values removeAllObjects];list.index=-1;}continue;
+        }
+        if([u hasPrefix:@"PROTOTYPE "]&&[u containsString:@"="]){
+            NSRange eq=[raw rangeOfString:@"="];NSString *name=[[MBTrim([raw substringWithRange:NSMakeRange(10,eq.location-10)])uppercaseString]copy];
+            NSString *procedure=[[MBTrim([raw substringFromIndex:eq.location+1])uppercaseString]copy];
+            if(!MB_GET(self.procedures,procedure)){if(error)*error=[self err:@"Prototype target is not a procedure" line:pc];return NO;}
+            MBProcedureRef *ref=[MBProcedureRef new];ref.name=procedure;MB_SET(vars,name,ref);continue;
+        }
+        if([u hasPrefix:@"INTERFACE "]&&![u hasPrefix:@"INTERFACE NEW "]&&![u hasPrefix:@"INTERFACE BIND "]){
+            pc=[self findEndFrom:pc open:@"~" close:@[@"END INTERFACE"] elseAt:NULL];continue;
+        }
+        if([u hasPrefix:@"INTERFACE NEW "]){
+            NSArray *p=[self parts:[raw substringFromIndex:14]];NSString *name=p.count?[[MB_GET(p,0)uppercaseString]copy]:@"";
+            NSString *contract=p.count>1?[[MB_GET(p,1)uppercaseString]copy]:@"";if(!MB_GET(self.interfaces,contract)){if(error)*error=[self err:@"Unknown interface" line:pc];return NO;}
+            MBInterfaceInstance *instance=[MBInterfaceInstance new];instance.interfaceName=contract;MB_SET(vars,name,instance);continue;
+        }
+        if([u hasPrefix:@"INTERFACE BIND "]){
+            NSArray *p=[self parts:[raw substringFromIndex:15]];MBInterfaceInstance *instance=p.count?MB_GET(vars,[MB_GET(p,0)uppercaseString]):nil;
+            NSString *method=p.count>1?[[MB_GET(p,1)uppercaseString]copy]:@"";NSString *procedure=p.count>2?[[MB_GET(p,2)uppercaseString]copy]:@"";
+            if(!instance||![MB_GET(self.interfaces,instance.interfaceName)containsObject:method]||!MB_GET(self.procedures,procedure)){
+                if(error)*error=[self err:@"Invalid interface binding" line:pc];return NO;}
+            MB_SET(instance.bindings,method,procedure);continue;
+        }
+        if([u hasPrefix:@"DATABASE OPEN "]){
+            NSArray *p=[self parts:[raw substringFromIndex:14]];NSInteger number=p.count?[[self evaluate:MB_GET(p,0)variables:vars]integerValue]:0;
+            NSString *path=p.count>1?MBString([self evaluate:MB_GET(p,1)variables:vars]):@"";
+            MBDatabase *db=[MBDatabase new];if(number<=0||sqlite3_open(path.UTF8String,&db->connection)!=SQLITE_OK){if(error)*error=[self err:@"Unable to open SQLite database" line:pc];return NO;}
+            MB_SET(self.databases,@(number),db);continue;
+        }
+        if([u hasPrefix:@"DATABASE EXEC "]||[u hasPrefix:@"DATABASE QUERY "]){
+            BOOL query=[u hasPrefix:@"DATABASE QUERY "];NSArray *p=[self parts:[raw substringFromIndex:query?15:14]];
+            MBDatabase *db=p.count?MB_GET(self.databases,@([[self evaluate:MB_GET(p,0)variables:vars]integerValue])):nil;
+            NSString *sql=p.count>1?MBString([self evaluate:MB_GET(p,1)variables:vars]):@"";if(!db){if(error)*error=[self err:@"Database is not open" line:pc];return NO;}
+            if(db->statement){sqlite3_finalize(db->statement);db->statement=NULL;}
+            int rc=query?sqlite3_prepare_v2(db->connection,sql.UTF8String,-1,&db->statement,NULL):sqlite3_exec(db->connection,sql.UTF8String,NULL,NULL,NULL);
+            if(rc!=SQLITE_OK){if(error)*error=[self err:[NSString stringWithUTF8String:sqlite3_errmsg(db->connection)] line:pc];return NO;}continue;
+        }
+        if([u hasPrefix:@"DATABASE CLOSE "]){
+            NSNumber *number=@([[self evaluate:[raw substringFromIndex:15]variables:vars]integerValue]);[self.databases removeObjectForKey:number];continue;
+        }
+        if([u hasPrefix:@"THREAD START "]){
+            NSArray *p=[self parts:[raw substringFromIndex:13]];NSString *procedure=p.count?[[MB_GET(p,0)uppercaseString]copy]:@"";
+            if(!MB_GET(self.procedures,procedure)){if(error)*error=[self err:@"THREAD START requires a procedure" line:pc];return NO;}
+            NSMutableArray *args=[NSMutableArray array];for(NSUInteger i=1;i<p.count;i++)[args addObject:[self evaluate:MB_GET(p,i)variables:vars]?:@0];
+            NSMutableDictionary *task=[@{@"procedure":procedure,@"args":args,@"variables":vars,@"done":@(NO)}mutableCopy];
+            [self.threadTasks addObject:task];[NSThread detachNewThreadSelector:@selector(runThreadTask:) toTarget:self withObject:task];continue;
+        }
+        if([u isEqual:@"THREAD WAIT"]){
+            BOOL done=NO;while(!done&&!self.stopped){done=YES;@synchronized(self.threadTasks){for(NSDictionary *task in self.threadTasks)if(![MB_GET(task,@"done")boolValue]){done=NO;break;}}if(!done)[NSThread sleepForTimeInterval:.001];}
+            continue;
         }
         if([u hasPrefix:@"ERASE "]){
             for(NSString *name in [self parts:[raw substringFromIndex:6]])[vars removeObjectForKey:[name uppercaseString]];
@@ -785,7 +959,8 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
                     NSString *s=MBString(value);if(s.length>width)s=[s substringToIndex:width];
                     NSUInteger pad=width-s.length;NSString *spaces=[@"" stringByPaddingToLength:pad withString:@" " startingAtIndex:0];
                     value=rightSet?[spaces stringByAppendingString:s]:[s stringByAppendingString:spaces];}
-                MB_SET(vars,name,[self coerceValue:value forName:name]);}
+                id existing=MB_GET(vars,name);id coerced=[self coerceValue:value forName:name];
+                if([existing isKindOfClass:[MBThreadedValue class]])[existing setValue:coerced];else MB_SET(vars,name,coerced);}
             continue;
         }
         NSRange par=[raw rangeOfString:@"("]; NSString *name; NSArray *argTexts;
@@ -797,6 +972,33 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 }
 - (id)call:(NSString *)name args:(NSArray *)args variables:(NSMutableDictionary *)caller error:(NSError **)error {
     NSString *key=[name uppercaseString];
+    MBProcedureRef *reference=MB_GET(caller,key);
+    if([reference isKindOfClass:[MBProcedureRef class]])key=reference.name;
+    NSRange dot=[key rangeOfString:@"."];
+    if(dot.location!=NSNotFound){
+        NSString *objectName=[key substringToIndex:dot.location],*method=[key substringFromIndex:dot.location+1];
+        MBInterfaceInstance *instance=MB_GET(caller,objectName);
+        if([instance isKindOfClass:[MBInterfaceInstance class]]){
+            NSString *target=MB_GET(instance.bindings,method);
+            if(!target){if(error)*error=[self err:[NSString stringWithFormat:@"Interface method '%@' is not bound",method] line:self.currentLine];return nil;}
+            key=target;
+        }
+    }
+    if([key isEqual:@"POINTER"]){
+        MBPointer *pointer=MB_GET(self.pointers,@([args.firstObject integerValue]));id value=pointer?MB_GET(pointer.variables,pointer.name):nil;
+        return [value isKindOfClass:[MBThreadedValue class]]?[value value]:(value?:@0);
+    }
+    if([key isEqual:@"LISTSIZE"]){MBLinkedList *list=args.firstObject;return @([list isKindOfClass:[MBLinkedList class]]?list.values.count:0);}
+    if([key isEqual:@"LISTVALID"]){MBLinkedList *list=args.firstObject;return @([list isKindOfClass:[MBLinkedList class]]&&list.index>=0&&list.index<(NSInteger)list.values.count?-1:0);}
+    if([key isEqual:@"LISTVALUE"]||[key isEqual:@"LISTVALUE$"]){MBLinkedList *list=args.firstObject;
+        id value=[list isKindOfClass:[MBLinkedList class]]&&list.index>=0&&list.index<(NSInteger)list.values.count?MB_GET(list.values,list.index):@0;
+        return [key hasSuffix:@"$"]?MBString(value):value;}
+    if([key isEqual:@"DATABASENEXT"]){MBDatabase *db=MB_GET(self.databases,@([args.firstObject integerValue]));return @(db&&db->statement&&sqlite3_step(db->statement)==SQLITE_ROW?-1:0);}
+    if([key isEqual:@"DATABASEFIELD"]||[key isEqual:@"DATABASEFIELD$"]){MBDatabase *db=MB_GET(self.databases,@([args.firstObject integerValue]));
+        NSInteger column=args.count>1?[MB_GET(args,1)integerValue]:0;if(!db||!db->statement||column<0||column>=sqlite3_column_count(db->statement))return [key hasSuffix:@"$"]?@"":@0;
+        if([key hasSuffix:@"$"]){const unsigned char *text=sqlite3_column_text(db->statement,(int)column);return text?[NSString stringWithUTF8String:(const char *)text]:@"";}
+        return @(sqlite3_column_double(db->statement,(int)column));
+    }
     if([key isEqual:@"LEN"])return @([MBString(args.firstObject) length]);
     if([key isEqual:@"LBOUND"]&&[args.firstObject isKindOfClass:[MBArray class]])return @([(MBArray *)args.firstObject lowerBound]);
     if([key isEqual:@"UBOUND"]&&[args.firstObject isKindOfClass:[MBArray class]]){
@@ -883,6 +1085,13 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
     [self executeFrom:[MB_GET(p,@"start") unsignedIntegerValue] to:[MB_GET(p,@"end") unsignedIntegerValue] variables:local result:&value returned:&returned error:error];
     return [self coerceValue:value forName:key];
 }
+- (void)runThreadTask:(NSMutableDictionary *)task {
+    @autoreleasepool {
+        NSError *error=nil;[self call:MB_GET(task,@"procedure") args:MB_GET(task,@"args") variables:MB_GET(task,@"variables") error:&error];
+        if(error)[self.platform writeText:[NSString stringWithFormat:@"Thread error: %@\n",error.localizedDescription]];
+        @synchronized(self.threadTasks){MB_SET(task,@"done",@(YES));}
+    }
+}
 - (BOOL)runSource:(NSString *)source error:(NSError **)error {
     self.stopped=NO;self.labelLines=[NSMutableDictionary dictionary];NSMutableArray *prepared=[NSMutableArray array];
     for(NSString *original in [source componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]){
@@ -895,12 +1104,19 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         [prepared addObject:line];
     }
     self.lines=prepared;
-    [self.procedures removeAllObjects];self.dataItems=[NSMutableArray array];self.dataLabels=[NSMutableDictionary dictionary];self.dataIndex=0;self.optionBase=0;self.defaultTypes=[NSMutableDictionary dictionary];self.files=[NSMutableDictionary dictionary];self.areaPoints=[NSMutableArray array];self.waveforms=[NSMutableDictionary dictionary];self.memory=[NSMutableDictionary dictionary];self.objects=[NSMutableDictionary dictionary];self.errorHandlerLine=nil;self.resumeTarget=nil;
+    [self.procedures removeAllObjects];self.dataItems=[NSMutableArray array];self.dataLabels=[NSMutableDictionary dictionary];self.dataIndex=0;self.optionBase=0;self.defaultTypes=[NSMutableDictionary dictionary];self.files=[NSMutableDictionary dictionary];self.areaPoints=[NSMutableArray array];self.waveforms=[NSMutableDictionary dictionary];self.memory=[NSMutableDictionary dictionary];self.objects=[NSMutableDictionary dictionary];self.pointers=[NSMutableDictionary dictionary];self.nextPointer=0;self.databases=[NSMutableDictionary dictionary];self.interfaces=[NSMutableDictionary dictionary];self.threadTasks=[NSMutableArray array];self.errorHandlerLine=nil;self.resumeTarget=nil;
     NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"(?i)^(SUB|FUNCTION)\\s+([A-Z_$][A-Z0-9_$]*)\\s*(?:\\((.*)\\))?$" options:0 error:NULL];
     for(NSUInteger i=0;i<self.lines.count;i++){NSString *s=MBTrim(MB_GET(self.lines,i));NSTextCheckingResult *m=[re firstMatchInString:s options:0 range:NSMakeRange(0,s.length)];if(!m)continue;
         NSString *name=[[s substringWithRange:[m rangeAtIndex:2]]uppercaseString];NSString *params=[m rangeAtIndex:3].location==NSNotFound?@"":[s substringWithRange:[m rangeAtIndex:3]];
         NSUInteger end=[self findEndFrom:i open:@"~" close:@[[[s uppercaseString]hasPrefix:@"SUB"]?@"END SUB":@"END FUNCTION"] elseAt:NULL];
         MB_SET(self.procedures,name,(@{@"params":[self parts:params],@"start":@(i+1),@"end":@(end)}));i=end;
+    }
+    for(NSUInteger i=0;i<self.lines.count;i++){
+        NSString *s=MBTrim(MB_GET(self.lines,i)),*u=[s uppercaseString];if(![u hasPrefix:@"INTERFACE "]||[u hasPrefix:@"INTERFACE NEW "]||[u hasPrefix:@"INTERFACE BIND "])continue;
+        NSString *name=[[MBTrim([s substringFromIndex:10])uppercaseString]copy];NSMutableSet *methods=[NSMutableSet set];NSUInteger end=i+1;
+        for(;end<self.lines.count;end++){NSString *member=[[MBTrim(MB_GET(self.lines,end))uppercaseString]copy];if([member isEqual:@"END INTERFACE"])break;
+            if([member hasPrefix:@"METHOD "])[methods addObject:MBTrim([member substringFromIndex:7])];}
+        MB_SET(self.interfaces,name,[methods copy]);i=end;
     }
     NSString *pendingLabel=nil;
     for(NSString *line in self.lines){

@@ -116,13 +116,17 @@ command-line tool. For applications, it then lets you choose an icon or use the
 generic MacBasic icon. `--compile` remains available as an alias for
 `--compile-tool`.
 
-The output contains both the MacBasic runtime and a private copy of the source,
-so the original `.bas` file is not required when the compiled program runs.
-Compiled programs start the native AppKit or GNUstep host, automatically run
-their embedded source, and support `WINDOW`, `VIEW`, drawing, sound, and input
-like the IDE. Compile on the operating system where the resulting executable
-will be used. Pass `--console` to a compiled program only when headless
-execution is desired; native window operations are ignored in that mode.
+Compilation generates an Objective-C translation unit and invokes Clang to
+link a new native executable against MacBasic's static support library. It no
+longer copies the MacBasic IDE executable or appends a `.bas` payload trailer.
+The generated program image is stored in the executable's data section, and
+the original `.bas` file is not required at run time. The temporary generated
+Objective-C file is removed after Clang finishes.
+
+Compiled programs support `WINDOW`, `VIEW`, drawing, sound, and input like the
+IDE. Compile on the operating system where the resulting executable will be
+used. Pass `--console` to a compiled program only when headless execution is
+desired; native window operations are ignored in that mode.
 
 ## Language
 
@@ -156,6 +160,38 @@ execution is desired; native window operations are ignored in that mode.
   or a sound-file path; `SOUND STOP` stops sounds started by the program.
 - AmigaBASIC-style `DATA`, `READ`, and `RESTORE [label]` maintain a shared
   sequential data pointer. Labels are written on their own line with a colon.
+
+### Advanced runtime features
+
+- Managed pointers safely refer to BASIC variables without exposing raw process
+  memory. `POINTER p TO value` creates a pointer, `POINTER(p)` reads it, and
+  `POINTER SET p, expression` writes through it.
+- Linked lists use `LIST CREATE name`, `LIST ADD name, value`, `LIST FIRST name`,
+  `LIST NEXT name`, `LIST SET name, value`, and `LIST CLEAR name`.
+  `LISTSIZE(name)`, `LISTVALID(name)`, and `LISTVALUE(name)` inspect the list
+  and its current element.
+- `PROTOTYPE callback = ProcedureName` stores a callable procedure reference.
+  Invoke it with normal function-call syntax, such as `callback(42)`.
+- Interfaces declare method contracts and dispatch bound BASIC procedures:
+
+  ```basic
+  INTERFACE Greeter
+    METHOD Greet
+  END INTERFACE
+
+  INTERFACE NEW greeter, Greeter
+  INTERFACE BIND greeter, Greet, GreetByName$
+  PRINT greeter.Greet("Ada")
+  ```
+
+- SQLite databases use numbered connections. Commands are `DATABASE OPEN`,
+  `DATABASE EXEC`, `DATABASE QUERY`, and `DATABASE CLOSE`. Iterate query rows
+  with `DATABASENEXT(id)` and read zero-based columns with
+  `DATABASEFIELD(id, column)` or `DATABASEFIELD$(id, column)`.
+- `THREADED variable` gives each program thread an isolated value.
+  `THREAD START Procedure[, arguments...]` runs a procedure in the background,
+  and `THREAD WAIT` waits for all started procedures to finish. UI operations
+  invoked by worker procedures are still marshalled through the platform host.
 
 ### AmigaBASIC compatibility
 
