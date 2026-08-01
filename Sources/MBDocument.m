@@ -155,7 +155,66 @@ static NSColor *MBColor(id value) {
         if(image)return image;
     }
 #endif
-    return [NSImage imageNamed:fallback];
+    NSImage *image=[NSImage imageNamed:fallback];
+    if(image)return image;
+
+    NSSize size=NSMakeSize(24,24);
+    image=[[NSImage alloc]initWithSize:size];
+    [image lockFocus];
+    [[NSColor clearColor]set];
+    NSRectFill(NSMakeRect(0,0,size.width,size.height));
+    [[NSColor controlTextColor]set];
+
+    if([fallback isEqual:@"NSRightFacingTriangleTemplate"]){
+        NSBezierPath *path=[NSBezierPath bezierPath];
+        [path moveToPoint:NSMakePoint(7,5)];
+        [path lineToPoint:NSMakePoint(18,12)];
+        [path lineToPoint:NSMakePoint(7,19)];
+        [path closePath];
+        [path fill];
+    }else if([fallback isEqual:@"NSQuickLookTemplate"]){
+        NSBezierPath *path=[NSBezierPath bezierPath];
+        [path moveToPoint:NSMakePoint(6,17)];
+        [path curveToPoint:NSMakePoint(18,7)
+             controlPoint1:NSMakePoint(11,17)
+             controlPoint2:NSMakePoint(12,7)];
+        [path setLineWidth:2.0];
+        [path stroke];
+        [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(4,15,4,4)]fill];
+        [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(16,5,4,4)]fill];
+    }else if([fallback isEqual:@"NSStopProgressTemplate"]){
+        [[NSBezierPath bezierPathWithRect:NSMakeRect(7,7,10,10)]fill];
+    }else if([fallback isEqual:@"NSGoRightTemplate"]){
+        NSBezierPath *path=[NSBezierPath bezierPath];
+        [path moveToPoint:NSMakePoint(7,5)];
+        [path lineToPoint:NSMakePoint(16,12)];
+        [path lineToPoint:NSMakePoint(7,19)];
+        [path closePath];
+        [path fill];
+        NSRectFill(NSMakeRect(17,6,2,12));
+    }else if([fallback isEqual:@"NSActionTemplate"]){
+        NSBezierPath *handle=[NSBezierPath bezierPath];
+        [handle moveToPoint:NSMakePoint(8,6)];
+        [handle lineToPoint:NSMakePoint(16,14)];
+        [handle setLineWidth:3.0];
+        [handle stroke];
+        NSBezierPath *head=[NSBezierPath bezierPath];
+        [head moveToPoint:NSMakePoint(11,16)];
+        [head lineToPoint:NSMakePoint(15,20)];
+        [head lineToPoint:NSMakePoint(20,15)];
+        [head lineToPoint:NSMakePoint(18,13)];
+        [head lineToPoint:NSMakePoint(16,15)];
+        [head lineToPoint:NSMakePoint(13,12)];
+        [head closePath];
+        [head fill];
+    }
+
+    [image unlockFocus];
+#if !defined(GNUSTEP)
+    if([image respondsToSelector:@selector(setTemplate:)])
+        [image setTemplate:YES];
+#endif
+    return image;
 }
 - (NSToolbarItem *)toolbarItem:(NSString *)identifier label:(NSString *)label
                         symbol:(NSString *)symbol fallback:(NSString *)fallback
