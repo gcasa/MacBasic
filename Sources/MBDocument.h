@@ -19,6 +19,7 @@
     NSUInteger _pendingTraceSteps;
     NSCondition *_traceCondition;
     BOOL _closingDocument;
+    BOOL _compiledMode;
 }
 - (void)compileDocument:(id)sender;
 - (void)runCompiledSource:(NSString *)source;

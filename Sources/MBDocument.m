@@ -110,6 +110,7 @@ static NSColor *MBColor(id value) {
 @property NSUInteger pendingTraceSteps;
 @property (retain) NSCondition *traceCondition;
 @property BOOL closingDocument;
+@property BOOL compiledMode;
 @end
 
 @implementation MBDocument
@@ -118,6 +119,7 @@ static NSColor *MBColor(id value) {
 @synthesize lastMenu=_lastMenu, lastMenuItem=_lastMenuItem, sourceBeforeWindow=_sourceBeforeWindow;
 @synthesize programRunning=_programRunning, tracePaused=_tracePaused, pendingTraceSteps=_pendingTraceSteps;
 @synthesize traceCondition=_traceCondition, closingDocument=_closingDocument;
+@synthesize compiledMode=_compiledMode;
 - (instancetype)init {
     if ((self=[super init])) {
         _basicWindows=[[NSMutableDictionary alloc]init];
@@ -392,6 +394,8 @@ static NSColor *MBColor(id value) {
     self.programRunning=NO;
     self.editor.editable=YES;
     [self clearTraceHighlight];
+    if(self.compiledMode&&self.basicWindows.count==0)
+        [NSApp terminate:nil];
 }
 - (void)stop:(id)sender {
     if(!self.programRunning)return;
@@ -414,6 +418,7 @@ static NSColor *MBColor(id value) {
     [self.traceCondition unlock];
 }
 - (void)showTracedLine:(NSNumber *)lineNumber {
+    if(!self.editor)return;
     NSString *source=self.editor.string;
     NSUInteger target=lineNumber.unsignedIntegerValue,start=0;
     for(NSUInteger line=0;line<target&&start<source.length;line++)
@@ -430,6 +435,7 @@ static NSColor *MBColor(id value) {
     }
 }
 - (void)clearTraceHighlight {
+    if(!self.editor)return;
     [self.editor.textStorage removeAttribute:NSBackgroundColorAttributeName
                                       range:NSMakeRange(0,self.editor.textStorage.length)];
 }
@@ -446,9 +452,10 @@ static NSColor *MBColor(id value) {
 }
 - (void)runCompiledSource:(NSString *)source {
     self.sourceBeforeWindow=source;
-    [self makeWindowControllers];
-    [self showWindows];
-    [self performSelector:@selector(run:) withObject:nil afterDelay:0];
+    self.compiledMode=YES;
+    self.programRunning=YES;
+    self.interpreter=[[MBInterpreter alloc]initWithPlatform:self];
+    [NSThread detachNewThreadSelector:@selector(runSourceInBackground:) toTarget:self withObject:[source copy]];
 }
 - (void)compileDocument:(id)sender {
     NSAlert *kindAlert=[NSAlert new];
@@ -511,6 +518,10 @@ static NSColor *MBColor(id value) {
         [self writeText:[NSString stringWithFormat:@"Compile error: %@\n",error.localizedDescription]];
 }
 - (void)appendOutput:(NSString *)text {
+    if(!self.output){
+        fprintf(stdout,"%s",text.UTF8String);fflush(stdout);
+        return;
+    }
     [self.output.textStorage appendAttributedString:[[NSAttributedString alloc]initWithString:text
         attributes:@{NSForegroundColorAttributeName:[NSColor blackColor],
                      NSFontAttributeName:[NSFont userFixedPitchFontOfSize:13]}]];
