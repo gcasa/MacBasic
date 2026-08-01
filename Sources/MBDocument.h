@@ -23,6 +23,7 @@
     NSMutableIndexSet *_breakpoints;
     NSDictionary *_debugVariables;
     MBGutterView *_gutter;
+    NSTextField *_variableInspector;
 }
 - (void)compileDocument:(id)sender;
 - (void)runCompiledSource:(NSString *)source;

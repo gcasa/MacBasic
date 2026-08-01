@@ -183,6 +183,7 @@ static NSColor *MBColor(id value) {
 @property (retain) NSMutableIndexSet *breakpoints;
 @property (copy) NSDictionary *debugVariables;
 @property (retain) MBGutterView *gutter;
+@property (retain) NSTextField *variableInspector;
 @end
 
 @implementation MBDocument
@@ -194,6 +195,7 @@ static NSColor *MBColor(id value) {
 @synthesize compiledMode=_compiledMode;
 @synthesize breakpoints=_breakpoints, debugVariables=_debugVariables;
 @synthesize gutter=_gutter;
+@synthesize variableInspector=_variableInspector;
 - (instancetype)init {
     if ((self=[super init])) {
         _basicWindows=[[NSMutableDictionary alloc]init];
@@ -376,7 +378,10 @@ static NSColor *MBColor(id value) {
     output.autoresizingMask=NSViewWidthSizable|NSViewMaxYMargin;
     MBGutterView *gutter=[[MBGutterView alloc]initWithFrame:NSMakeRect(10,205,44,435)];
     gutter.textView=editorText;gutter.gutterDelegate=self;self.gutter=gutter;
-    NSView *content=window.contentView;[content addSubview:editor];[content addSubview:gutter];[content addSubview:output];
+    NSTextField *inspector=[[NSTextField alloc]initWithFrame:NSMakeRect(650,612,225,22)];inspector.editable=NO;inspector.selectable=YES;
+    inspector.bezeled=YES;inspector.drawsBackground=YES;inspector.backgroundColor=[NSColor colorWithCalibratedRed:1 green:.96 blue:.72 alpha:.96];
+    inspector.font=[NSFont userFixedPitchFontOfSize:12];inspector.hidden=YES;inspector.autoresizingMask=NSViewMinXMargin|NSViewMinYMargin;self.variableInspector=inspector;
+    NSView *content=window.contentView;[content addSubview:editor];[content addSubview:gutter];[content addSubview:output];[content addSubview:inspector];
     [gutter watchScrollView:editor];[gutter synchronizeFrame];
     NSToolbar *toolbar=[[NSToolbar alloc]initWithIdentifier:@"org.macbasic.document.toolbar"];
     toolbar.delegate=self;toolbar.displayMode=NSToolbarDisplayModeIconAndLabel;
@@ -405,6 +410,17 @@ static NSColor *MBColor(id value) {
     [self highlightSyntax];
     [self.gutter setNeedsDisplay:YES];
     [self.editor removeAllToolTips];[self.editor addToolTipRect:self.editor.bounds owner:self userData:NULL];
+}
+- (void)textViewDidChangeSelection:(NSNotification *)notification {[self updateVariableInspector];}
+- (void)updateVariableInspector {
+    self.variableInspector.hidden=YES;if(!self.debugVariables.count)return;
+    NSRange range=self.editor.selectedRange;NSString *source=self.editor.string?:@"";
+    if(!range.length||NSMaxRange(range)>source.length)return;
+    NSString *spelling=[source substringWithRange:range];
+    NSRegularExpression *identifier=[NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z_][A-Za-z0-9_$%&!#]*$" options:0 error:NULL];
+    if(![identifier firstMatchInString:spelling options:0 range:NSMakeRange(0,spelling.length)])return;
+    NSString *name=[spelling uppercaseString];id value=[self.debugVariables objectForKey:name];if(!value||[name hasPrefix:@"__"])return;
+    self.variableInspector.stringValue=[NSString stringWithFormat:@"%@ = %@",spelling,value];self.variableInspector.hidden=NO;
 }
 - (BOOL)hasBreakpointAtLine:(NSUInteger)line {return [self.breakpoints containsIndex:line];}
 - (void)toggleBreakpointAtLine:(NSUInteger)line {
@@ -493,6 +509,7 @@ static NSColor *MBColor(id value) {
     [self.traceCondition unlock];
     self.programRunning=NO;
     self.debugVariables=nil;
+    self.variableInspector.hidden=YES;
     self.editor.editable=YES;
     [self clearTraceHighlight];
     if(self.compiledMode&&self.basicWindows.count==0)
@@ -555,6 +572,7 @@ static NSColor *MBColor(id value) {
 - (void)showDebugState:(NSDictionary *)state {
     self.debugVariables=[state objectForKey:@"variables"];
     [self showTracedLine:[state objectForKey:@"line"]];
+    [self updateVariableInspector];
 }
 - (void)debugLine:(NSUInteger)line variables:(NSDictionary *)variables breakpoint:(BOOL)breakpoint {
     if(breakpoint){[self.traceCondition lock];self.tracePaused=YES;self.pendingTraceSteps=0;[self.traceCondition unlock];}
