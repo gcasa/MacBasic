@@ -134,7 +134,9 @@ static NSColor *MBColor(id value) {
 - (CGFloat)yForCharacter:(NSUInteger)character textView:(NSTextView *)text {
     if(!text.layoutManager.numberOfGlyphs)return text.textContainerOrigin.y;
     NSUInteger safe=MIN(character,text.string.length?text.string.length-1:0);
-    NSUInteger glyph=[text.layoutManager glyphIndexForCharacterAtIndex:safe];
+    NSRange glyphRange=[text.layoutManager glyphRangeForCharacterRange:NSMakeRange(safe,1) actualCharacterRange:NULL];
+    if(glyphRange.length==0)return text.textContainerOrigin.y;
+    NSUInteger glyph=glyphRange.location;
     NSRect fragment=[text.layoutManager lineFragmentRectForGlyphAtIndex:glyph effectiveRange:NULL];
     NSPoint point=[self convertPoint:NSMakePoint(0,NSMinY(fragment)+text.textContainerOrigin.y) fromView:text];
     return point.y;
@@ -379,7 +381,14 @@ static NSColor *MBColor(id value) {
     MBGutterView *gutter=[[MBGutterView alloc]initWithFrame:NSMakeRect(10,205,44,435)];
     gutter.textView=editorText;gutter.gutterDelegate=self;self.gutter=gutter;
     NSTextField *inspector=[[NSTextField alloc]initWithFrame:NSMakeRect(650,612,225,22)];inspector.editable=NO;inspector.selectable=YES;
-    inspector.bezeled=YES;inspector.drawsBackground=YES;inspector.backgroundColor=[NSColor colorWithCalibratedRed:1 green:.96 blue:.72 alpha:.96];
+    inspector.bezeled=YES;inspector.drawsBackground=YES;
+#if defined(GNUSTEP)
+    inspector.backgroundColor=[NSColor colorWithCalibratedRed:.12 green:.16 blue:.20 alpha:1];
+    inspector.textColor=[NSColor whiteColor];
+#else
+    inspector.backgroundColor=[NSColor colorWithCalibratedRed:1 green:.96 blue:.72 alpha:.96];
+    inspector.textColor=[NSColor controlTextColor];
+#endif
     inspector.font=[NSFont userFixedPitchFontOfSize:12];inspector.hidden=YES;inspector.autoresizingMask=NSViewMinXMargin|NSViewMinYMargin;self.variableInspector=inspector;
     NSView *content=window.contentView;[content addSubview:editor];[content addSubview:gutter];[content addSubview:output];[content addSubview:inspector];
     [gutter watchScrollView:editor];[gutter synchronizeFrame];
