@@ -3,6 +3,7 @@
 #import "MBCompiler.h"
 #import "MBDocument.h"
 #import "MBInterpreter.h"
+#include <stdlib.h>
 
 @interface MBConsolePlatform : NSObject <MBPlatform> @end
 @implementation MBConsolePlatform
@@ -57,6 +58,20 @@
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {return YES;}
 @end
 
+#if defined(GNUSTEP)
+static BOOL MBHasDisplay(void) {
+    const char *display = getenv("DISPLAY");
+    return display && display[0];
+}
+
+static void MBPrintDisplayError(BOOL compiled) {
+    if (compiled)
+        fprintf(stderr, "MacBasic: cannot start the GUI because DISPLAY is not set. Run with --console for headless execution, or start an X server and launch the app from that session.\n");
+    else
+        fprintf(stderr, "MacBasic: cannot start the IDE because DISPLAY is not set. Pass a .bas file to run in console mode, or start an X server and launch the app from that session.\n");
+}
+#endif
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         BOOL compileTool=argc==4&&(strcmp(argv[1],"--compile")==0||strcmp(argv[1],"--compile-tool")==0);
@@ -86,6 +101,9 @@ int main(int argc, const char *argv[]) {
                 }
                 return 0;
             }
+#if defined(GNUSTEP)
+            if(!MBHasDisplay()){MBPrintDisplayError(YES);return 1;}
+#endif
             NSApplication *app=[NSApplication sharedApplication];
             MBCompiledAppDelegate *delegate=[MBCompiledAppDelegate new];
             delegate.source=embeddedSource;app.delegate=delegate;[app run];return 0;
@@ -102,6 +120,9 @@ int main(int argc, const char *argv[]) {
             }
             return 0;
         }
+#if defined(GNUSTEP)
+        if(!MBHasDisplay()){MBPrintDisplayError(NO);return 1;}
+#endif
         NSApplication *app = [NSApplication sharedApplication];
         MBAppDelegate *delegate = [MBAppDelegate new];
         app.delegate = delegate;

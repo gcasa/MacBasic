@@ -59,11 +59,12 @@ static NSString *MBGeneratedMain(NSString *source,BOOL application) {
           "@implementation D\n-(void)applicationDidFinishLaunching:(NSNotification*)n{_d=[MBDocument new];[_d runCompiledSource:P()];\n"
           "#if !defined(GNUSTEP)\n[NSApp activateIgnoringOtherApps:YES];\n#endif\n}"
           "-(BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)s{return YES;}@end\n"
-          "int main(int c,const char**v){if(c>1&&strcmp(v[1],\"--console\")==0)return R();"
+          "int main(int c,const char**v){if(c>1&&strcmp(v[1],\"--console\")==0)return R();\n"
+          "#if defined(GNUSTEP)\nconst char*dsp=getenv(\"DISPLAY\");if(!dsp||!*dsp){fprintf(stderr,\"MacBasic: cannot start the GUI because DISPLAY is not set. Run with --console for headless execution, or start an X server and launch the app from that session.\\n\");return 1;}\n#endif\n"
           "@autoreleasepool{NSApplication*a=[NSApplication sharedApplication];D*d=[D new];a.delegate=d;[a run];}return 0;}\n"]]
         :[console stringByAppendingString:[run stringByAppendingString:@"int main(){return R();}\n"]];
     return [NSString stringWithFormat:
-        @"#import <AppKit/AppKit.h>\n#import \"MBInterpreter.h\"\n"
+        @"#import <AppKit/AppKit.h>\n#import \"MBInterpreter.h\"\n#include <stdlib.h>\n"
          "static const unsigned char S[]=%@;\nstatic NSString*P(void){return [[NSString alloc]initWithUTF8String:(const char*)S];}\n%@",
         bytes,platform];
 }
