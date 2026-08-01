@@ -94,7 +94,76 @@ static NSColor *MBColor(id value) {
 }
 @end
 
-@interface MBDocument ()
+@protocol MBGutterDelegate <NSObject>
+- (BOOL)hasBreakpointAtLine:(NSUInteger)line;
+- (void)toggleBreakpointAtLine:(NSUInteger)line;
+@end
+
+@interface MBGutterView : NSView
+@property (assign) id<MBGutterDelegate> gutterDelegate;
+@property (assign) NSTextView *textView;
+@property (assign) NSScrollView *scrollView;
+- (void)watchScrollView:(NSScrollView *)scrollView;
+@end
+
+@implementation MBGutterView
+- (BOOL)isFlipped {return YES;}
+- (BOOL)isOpaque {return NO;}
+- (NSView *)hitTest:(NSPoint)point {return point.x<44?[super hitTest:point]:nil;}
+- (void)watchScrollView:(NSScrollView *)scrollView {
+    self.scrollView=scrollView;NSClipView *clipView=scrollView.contentView;
+    clipView.postsBoundsChangedNotifications=YES;
+    [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(clipViewDidScroll:) name:NSViewBoundsDidChangeNotification object:clipView];
+    scrollView.postsFrameChangedNotifications=YES;clipView.postsFrameChangedNotifications=YES;
+    [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(editorFrameDidChange:) name:NSViewFrameDidChangeNotification object:scrollView];
+    [[NSNotificationCenter defaultCenter]addObserver:self selector:@selector(editorFrameDidChange:) name:NSViewFrameDidChangeNotification object:clipView];
+}
+- (void)clipViewDidScroll:(NSNotification *)note {[self setNeedsDisplay:YES];}
+- (void)editorFrameDidChange:(NSNotification *)note {[self synchronizeFrame];}
+- (void)synchronizeFrame {
+    if(!self.scrollView||!self.superview)return;NSClipView *clip=self.scrollView.contentView;
+    NSRect viewport=[clip.superview convertRect:clip.frame toView:self.superview];
+    self.frame=NSMakeRect(NSMinX(self.scrollView.frame)-44,NSMinY(viewport),44,NSHeight(viewport));[self setNeedsDisplay:YES];
+}
+- (void)dealloc {[[NSNotificationCenter defaultCenter]removeObserver:self];}
+- (NSUInteger)lineForCharacter:(NSUInteger)character source:(NSString *)source {
+    NSUInteger line=0,position=0;
+    while(position<character&&position<source.length){position=NSMaxRange([source lineRangeForRange:NSMakeRange(position,0)]);line++;}
+    return line;
+}
+- (CGFloat)yForCharacter:(NSUInteger)character textView:(NSTextView *)text {
+    if(!text.layoutManager.numberOfGlyphs)return text.textContainerOrigin.y;
+    NSUInteger safe=MIN(character,text.string.length?text.string.length-1:0);
+    NSUInteger glyph=[text.layoutManager glyphIndexForCharacterAtIndex:safe];
+    NSRect fragment=[text.layoutManager lineFragmentRectForGlyphAtIndex:glyph effectiveRange:NULL];
+    NSPoint point=[self convertPoint:NSMakePoint(0,NSMinY(fragment)+text.textContainerOrigin.y) fromView:text];
+    return point.y;
+}
+- (void)drawRect:(NSRect)rect {
+    [[NSColor colorWithCalibratedWhite:0.90 alpha:1]setFill];NSRectFill(NSIntersectionRect(rect,NSMakeRect(0,0,44,self.bounds.size.height)));
+    NSTextView *text=self.textView;if(!text)return;
+    NSDictionary *attributes=@{NSFontAttributeName:[NSFont userFixedPitchFontOfSize:11],NSForegroundColorAttributeName:[NSColor darkGrayColor]};
+    NSString *source=text.string?:@"";NSUInteger position=0,line=0;
+    do {
+        CGFloat y=[self yForCharacter:position textView:text];
+        if(y>=NSMinY(rect)-20&&y<=NSMaxY(rect)){
+            if([self.gutterDelegate hasBreakpointAtLine:line]){[[NSColor colorWithCalibratedRed:.8 green:.1 blue:.12 alpha:1]setFill];[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(3,y+3,10,10)]fill];}
+            NSString *number=[NSString stringWithFormat:@"%lu",(unsigned long)line+1];NSSize size=[number sizeWithAttributes:attributes];
+            [number drawAtPoint:NSMakePoint(self.bounds.size.width-size.width-5,y+1) withAttributes:attributes];
+        }
+        if(position>=source.length)break;
+        position=NSMaxRange([source lineRangeForRange:NSMakeRange(position,0)]);line++;
+    }while(position<=source.length);
+}
+- (void)mouseDown:(NSEvent *)event {
+    NSTextView *text=self.textView;if(!text)return;
+    NSPoint point=[text convertPoint:event.locationInWindow fromView:nil];point.x=text.textContainerOrigin.x;point.y-=text.textContainerOrigin.y;
+    NSUInteger character=0;if(text.layoutManager.numberOfGlyphs){NSUInteger glyph=[text.layoutManager glyphIndexForPoint:point inTextContainer:text.textContainer];character=[text.layoutManager characterIndexForGlyphAtIndex:glyph];}
+    [self.gutterDelegate toggleBreakpointAtLine:[self lineForCharacter:character source:text.string?:@""]];[self setNeedsDisplay:YES];
+}
+@end
+
+@interface MBDocument () <MBGutterDelegate>
 @property (retain) NSTextView *editor;
 @property (retain) NSTextView *output;
 @property (retain) MBInterpreter *interpreter;
@@ -111,6 +180,9 @@ static NSColor *MBColor(id value) {
 @property (retain) NSCondition *traceCondition;
 @property BOOL closingDocument;
 @property BOOL compiledMode;
+@property (retain) NSMutableIndexSet *breakpoints;
+@property (copy) NSDictionary *debugVariables;
+@property (retain) MBGutterView *gutter;
 @end
 
 @implementation MBDocument
@@ -120,12 +192,15 @@ static NSColor *MBColor(id value) {
 @synthesize programRunning=_programRunning, tracePaused=_tracePaused, pendingTraceSteps=_pendingTraceSteps;
 @synthesize traceCondition=_traceCondition, closingDocument=_closingDocument;
 @synthesize compiledMode=_compiledMode;
+@synthesize breakpoints=_breakpoints, debugVariables=_debugVariables;
+@synthesize gutter=_gutter;
 - (instancetype)init {
     if ((self=[super init])) {
         _basicWindows=[[NSMutableDictionary alloc]init];
         _canvasViews=[[NSMutableDictionary alloc]init];
         _playingSounds=[[NSMutableArray alloc]init];
         _traceCondition=[[NSCondition alloc]init];
+        _breakpoints=[[NSMutableIndexSet alloc]init];
         _sourceBeforeWindow=@"' Welcome to MacBasic\n"
             "' String literals use the straight ASCII U+0022 delimiter only.\n"
             "SUB Greet(name$)\n"
@@ -294,17 +369,21 @@ static NSColor *MBColor(id value) {
 #endif
     window.minSize=NSMakeSize(600,420);
     NSTextView *editorText=nil,*outputText=nil;
-    NSScrollView *editor=[self scrollWithText:&editorText frame:NSMakeRect(10,205,880,435) editable:YES];
+    NSScrollView *editor=[self scrollWithText:&editorText frame:NSMakeRect(54,205,836,435) editable:YES];
     NSScrollView *output=[self scrollWithText:&outputText frame:NSMakeRect(10,10,880,185) editable:NO];
     self.editor=editorText;self.output=outputText;
     editor.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
     output.autoresizingMask=NSViewWidthSizable|NSViewMaxYMargin;
-    NSView *content=window.contentView;[content addSubview:editor];[content addSubview:output];
+    MBGutterView *gutter=[[MBGutterView alloc]initWithFrame:NSMakeRect(10,205,44,435)];
+    gutter.textView=editorText;gutter.gutterDelegate=self;self.gutter=gutter;
+    NSView *content=window.contentView;[content addSubview:editor];[content addSubview:gutter];[content addSubview:output];
+    [gutter watchScrollView:editor];[gutter synchronizeFrame];
     NSToolbar *toolbar=[[NSToolbar alloc]initWithIdentifier:@"org.macbasic.document.toolbar"];
     toolbar.delegate=self;toolbar.displayMode=NSToolbarDisplayModeIconAndLabel;
     toolbar.allowsUserCustomization=YES;toolbar.autosavesConfiguration=NO;
     window.toolbar=toolbar;
     self.editor.string=self.sourceBeforeWindow?:@"";self.output.string=@"Ready.\n";
+    [self.editor addToolTipRect:self.editor.bounds owner:self userData:NULL];
     [self highlightSyntax];
     [self addWindowController:[[NSWindowController alloc]initWithWindow:window]];
 }
@@ -324,6 +403,26 @@ static NSColor *MBColor(id value) {
 - (void)textDidChange:(NSNotification *)notification {
     [self updateChangeCount:NSChangeDone];
     [self highlightSyntax];
+    [self.gutter setNeedsDisplay:YES];
+    [self.editor removeAllToolTips];[self.editor addToolTipRect:self.editor.bounds owner:self userData:NULL];
+}
+- (BOOL)hasBreakpointAtLine:(NSUInteger)line {return [self.breakpoints containsIndex:line];}
+- (void)toggleBreakpointAtLine:(NSUInteger)line {
+    if([self.breakpoints containsIndex:line])[self.breakpoints removeIndex:line];else[self.breakpoints addIndex:line];
+    [self.interpreter setBreakpoints:self.breakpoints];
+}
+- (NSString *)view:(NSView *)view stringForToolTip:(NSToolTipTag)tag point:(NSPoint)point userData:(void *)data {
+    if(view!=self.editor||!self.debugVariables.count||!self.editor.layoutManager.numberOfGlyphs)return nil;
+    NSPoint containerPoint=NSMakePoint(point.x-self.editor.textContainerOrigin.x,point.y-self.editor.textContainerOrigin.y);
+    NSUInteger glyph=[self.editor.layoutManager glyphIndexForPoint:containerPoint inTextContainer:self.editor.textContainer];
+    NSUInteger index=[self.editor.layoutManager characterIndexForGlyphAtIndex:glyph];NSString *source=self.editor.string?:@"";
+    if(index>=source.length)return nil;
+    NSCharacterSet *letters=[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$%&!#"];
+    if(![letters characterIsMember:[source characterAtIndex:index]])return nil;
+    NSUInteger start=index,end=index+1;while(start&&[letters characterIsMember:[source characterAtIndex:start-1]])start--;
+    while(end<source.length&&[letters characterIsMember:[source characterAtIndex:end]])end++;
+    NSString *spelling=[source substringWithRange:NSMakeRange(start,end-start)],*name=[spelling uppercaseString];id value=[self.debugVariables objectForKey:name];
+    return value&&![name hasPrefix:@"__"]?[NSString stringWithFormat:@"%@ = %@",spelling,value]:nil;
 }
 - (void)colorPattern:(NSString *)pattern color:(NSColor *)color options:(NSRegularExpressionOptions)options {
     NSError *error=nil;NSRegularExpression *regex=[NSRegularExpression regularExpressionWithPattern:pattern options:options error:&error];
@@ -374,6 +473,7 @@ static NSColor *MBColor(id value) {
     self.tracePaused=NO;self.pendingTraceSteps=0;
     self.output.string=@"";self.interpreter=[[MBInterpreter alloc]initWithPlatform:self];
     self.interpreter.tracing=tracing;
+    [self.interpreter setBreakpoints:self.breakpoints];self.debugVariables=nil;
     self.editor.editable=NO;
     NSString *source=[self.editor.string copy];
     [NSThread detachNewThreadSelector:@selector(runSourceInBackground:) toTarget:self withObject:source];
@@ -392,6 +492,7 @@ static NSColor *MBColor(id value) {
     [self.traceCondition broadcast];
     [self.traceCondition unlock];
     self.programRunning=NO;
+    self.debugVariables=nil;
     self.editor.editable=YES;
     [self clearTraceHighlight];
     if(self.compiledMode&&self.basicWindows.count==0)
@@ -412,6 +513,7 @@ static NSColor *MBColor(id value) {
 }
 - (void)step:(id)sender {
     if(!self.programRunning||!self.tracePaused)return;
+    self.interpreter.tracing=YES;
     [self.traceCondition lock];
     self.pendingTraceSteps++;
     [self.traceCondition signal];
@@ -449,6 +551,20 @@ static NSColor *MBColor(id value) {
     if(stopped)return;
     [self performSelectorOnMainThread:@selector(showTracedLine:) withObject:@(line) waitUntilDone:YES];
     [NSThread sleepForTimeInterval:0.08];
+}
+- (void)showDebugState:(NSDictionary *)state {
+    self.debugVariables=[state objectForKey:@"variables"];
+    [self showTracedLine:[state objectForKey:@"line"]];
+}
+- (void)debugLine:(NSUInteger)line variables:(NSDictionary *)variables breakpoint:(BOOL)breakpoint {
+    if(breakpoint){[self.traceCondition lock];self.tracePaused=YES;self.pendingTraceSteps=0;[self.traceCondition unlock];}
+    [self performSelectorOnMainThread:@selector(showDebugState:) withObject:@{@"line":@(line),@"variables":variables?:@{}} waitUntilDone:YES];
+    if(breakpoint)[self writeText:[NSString stringWithFormat:@"Breakpoint at line %lu. Use Step or Run to continue.\n",(unsigned long)line+1]];
+    [self.traceCondition lock];
+    while(self.tracePaused&&self.pendingTraceSteps==0&&!self.interpreter.stopped)[self.traceCondition wait];
+    if(self.pendingTraceSteps)self.pendingTraceSteps--;
+    BOOL stopped=self.interpreter.stopped;[self.traceCondition unlock];
+    if(!stopped&&self.interpreter.tracing)[NSThread sleepForTimeInterval:.08];
 }
 - (void)runCompiledSource:(NSString *)source {
     self.sourceBeforeWindow=source;

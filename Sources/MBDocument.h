@@ -1,7 +1,7 @@
 #import <AppKit/AppKit.h>
 #import "MBInterpreter.h"
 
-@class MBCanvasView;
+@class MBCanvasView, MBGutterView;
 
 @interface MBDocument : NSDocument <MBPlatform, NSTextViewDelegate, NSToolbarDelegate> {
     NSTextView *_editor;
@@ -20,6 +20,9 @@
     NSCondition *_traceCondition;
     BOOL _closingDocument;
     BOOL _compiledMode;
+    NSMutableIndexSet *_breakpoints;
+    NSDictionary *_debugVariables;
+    MBGutterView *_gutter;
 }
 - (void)compileDocument:(id)sender;
 - (void)runCompiledSource:(NSString *)source;

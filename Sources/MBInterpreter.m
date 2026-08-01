@@ -344,6 +344,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @synthesize errorHandlerLine=_errorHandlerLine, currentLine=_currentLine, faultLine=_faultLine;
 @synthesize resumeTarget=_resumeTarget, objects=_objects, defaultTypes=_defaultTypes;
 @synthesize pointers=_pointers, nextPointer=_nextPointer, databases=_databases, interfaces=_interfaces, threadTasks=_threadTasks;
+- (void)setBreakpoints:(NSIndexSet *)breakpoints {@synchronized(self){_breakpoints=[breakpoints copy];}}
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform {
     if ((self=[super init])) { self.platform=platform; _procedures=[[NSMutableDictionary alloc]init]; } return self;
 }
@@ -436,7 +437,10 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         if(!raw.length||[raw hasPrefix:@"'"]||[u hasPrefix:@"REM "])continue;
         if([raw hasSuffix:@":"])continue;
         if([u hasPrefix:@"DATA"]&& (u.length==4||[u characterAtIndex:4]==' '))continue;
-        if(self.tracing&&[self.platform respondsToSelector:@selector(traceLine:)])
+        BOOL breakpoint=NO;@synchronized(self){breakpoint=[_breakpoints containsIndex:pc];}
+        if((self.tracing||breakpoint)&&[self.platform respondsToSelector:@selector(debugLine:variables:breakpoint:)])
+            [self.platform debugLine:pc variables:[vars copy] breakpoint:breakpoint];
+        else if(self.tracing&&[self.platform respondsToSelector:@selector(traceLine:)])
             [self.platform traceLine:pc];
         if(self.stopped)break;
         if([u hasPrefix:@"OPTION BASE "]){

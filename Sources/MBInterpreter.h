@@ -21,6 +21,7 @@
 - (void)runProcess:(NSString *)path arguments:(NSArray<NSString *> *)arguments;
 @optional
 - (void)traceLine:(NSUInteger)line;
+- (void)debugLine:(NSUInteger)line variables:(NSDictionary *)variables breakpoint:(BOOL)breakpoint;
 @end
 
 @interface MBInterpreter : NSObject {
@@ -49,9 +50,11 @@
     NSMutableDictionary *_databases;
     NSMutableDictionary *_interfaces;
     NSMutableArray *_threadTasks;
+    NSIndexSet *_breakpoints;
 }
 @property (atomic) BOOL stopped;
 @property (atomic) BOOL tracing;
+- (void)setBreakpoints:(NSIndexSet *)breakpoints;
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform;
 - (BOOL)runSource:(NSString *)source error:(NSError **)error;
 @end
