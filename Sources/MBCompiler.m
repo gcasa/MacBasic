@@ -1,4 +1,5 @@
 #import "MBCompiler.h"
+#import "MBInterpreter.h"
 #include <sys/stat.h>
 
 static NSString *const MBCompilerErrorDomain=@"MacBasic.Compiler";
@@ -85,6 +86,8 @@ static NSArray *MBGNUstepConfigOutput(NSString *option) {
 #endif
 
 static BOOL MBRunClang(NSString *source,NSString *outputPath,BOOL application,NSError **error) {
+    MBInterpreter *validator=[[MBInterpreter alloc]initWithPlatform:nil];
+    if(![validator validateSource:source error:error])return NO;
     NSString *library=MBRuntimeLibraryPath();
     if(!library){
         if(error)*error=[NSError errorWithDomain:MBCompilerErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey:

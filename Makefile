@@ -74,6 +74,10 @@ test: $(BUILD)/$(APP)
 	test -f $(COMPILED_APP_INFO)
 	test -f $(COMPILED_APP_ICON)
 	$(COMPILED_APP_EXECUTABLE) --console | diff -u Tests/language.expected -
+	! $(BUILD)/$(APP) Tests/syntax-error.bas 2> $(BUILD)/syntax-error.interpreted
+	diff -u Tests/syntax-error.expected $(BUILD)/syntax-error.interpreted
+	! $(BUILD)/$(APP) --compile-tool Tests/syntax-error.bas $(BUILD)/syntax-error-compiled 2> $(BUILD)/syntax-error.compiled
+	diff -u Tests/syntax-error.expected $(BUILD)/syntax-error.compiled
 
 test-gnustep-docker:
 	docker build -f Tests/Dockerfile.gnustep -t macbasic-gnustep-check .

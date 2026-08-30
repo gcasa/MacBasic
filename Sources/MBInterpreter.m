@@ -1096,7 +1096,71 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         @synchronized(self.threadTasks){MB_SET(task,@"done",@(YES));}
     }
 }
+
+- (BOOL)validateSource:(NSString *)source error:(NSError **)error {
+    NSArray *sourceLines=[source componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSMutableSet *procedures=[NSMutableSet set];
+    NSRegularExpression *numbered=[NSRegularExpression regularExpressionWithPattern:@"^[0-9]+\\s+(.*)$" options:0 error:NULL];
+    NSRegularExpression *declaration=[NSRegularExpression regularExpressionWithPattern:@"(?i)^(?:SUB|FUNCTION)\\s+([A-Z_$][A-Z0-9_$]*)" options:0 error:NULL];
+    for(NSString *original in sourceLines){
+        NSString *line=MBTrim(original);NSTextCheckingResult *n=[numbered firstMatchInString:line options:0 range:NSMakeRange(0,line.length)];
+        if(n)line=[line substringWithRange:[n rangeAtIndex:1]];
+        NSTextCheckingResult *d=[declaration firstMatchInString:line options:0 range:NSMakeRange(0,line.length)];
+        if(d)[procedures addObject:[[line substringWithRange:[d rangeAtIndex:1]]uppercaseString]];
+    }
+
+    NSArray *prefixes=@[@"OPTION BASE ",@"DIM ",@"THREADED ",@"POINTER ",@"LIST ",@"DATABASE ",@"INTERFACE ",
+        @"METHOD ",@"DATA",@"READ ",@"RESTORE",@"PRINT",@"INPUT ",@"LINE INPUT ",@"OPEN ",@"CLOSE ",
+        @"FIELD #",@"GET #",@"PUT #",@"WRITE #",@"FOR ",@"NEXT",@"WHILE ",@"IF ",@"ELSE",@"ELSEIF ",
+        @"ON ",@"GOTO ",@"GOSUB ",@"RETURN",@"RESUME ",@"ERROR ",@"RANDOMIZE",@"SWAP ",@"WAIT ",
+        @"POKE ",@"POKEW ",@"POKEL ",@"DEFINT ",@"DEFLNG ",@"DEFSNG ",@"DEFDBL ",@"DEFSTR ",
+        @"CHDIR ",@"KILL ",@"NAME ",@"FILES",@"SAVE ",@"RUN ",@"CHAIN ",@"ERASE ",@"CLEAR ",
+        @"WINDOW ",@"VIEW ",@"SCREEN ",@"CLS",@"COLOR ",@"PALETTE ",@"PSET ",@"PRESET ",
+        @"LINE ",@"CIRCLE ",@"PAINT ",@"DRAW ",@"AREA ",@"AREAFILL",@"PATTERN ",@"SCROLL ",
+        @"WIDTH ",@"SOUND ",@"WAVE ",@"SAY ",@"SLEEP ",@"BEEP",@"MENU ",@"OBJECT.",
+        @"PROCESS RUN ",@"THREAD ",@"LIBRARY ",@"DECLARE ",@"COMMON ",@"SHARED ",@"STATIC ",
+        @"PROTOTYPE ",@"SUB ",@"FUNCTION ",@"END",@"EXIT ",@"WEND",@"STOP",@"SYSTEM",@"BREAK ",
+        @"KEY ",@"MOUSE ",@"COLLISION ",@"TIMER ",@"LET ",@"LSET ",@"RSET "];
+    NSRegularExpression *assignment=[NSRegularExpression regularExpressionWithPattern:@"(?i)^(?:LET\\s+|[LR]SET\\s+)?[A-Z_][A-Z0-9_$%&!#]*(?:\\s*\\([^=]*\\))?\\s*=" options:0 error:NULL];
+    NSMutableArray *blocks=[NSMutableArray array];
+    for(NSUInteger i=0;i<sourceLines.count;i++){
+        NSString *line=MBTrim([sourceLines objectAtIndex:i]);NSTextCheckingResult *n=[numbered firstMatchInString:line options:0 range:NSMakeRange(0,line.length)];
+        if(n)line=MBTrim([line substringWithRange:[n rangeAtIndex:1]]);
+        NSString *u=[line uppercaseString];if(!line.length||[line hasPrefix:@"'"]||[u hasPrefix:@"REM "]||[line hasSuffix:@":"])continue;
+        BOOL quote=NO;NSInteger depth=0;
+        for(NSUInteger j=0;j<line.length;j++){unichar c=[line characterAtIndex:j];
+            if(c=='"'){if(quote&&j+1<line.length&&[line characterAtIndex:j+1]=='"'){j++;continue;}quote=!quote;}
+            else if(!quote&&c=='(')depth++;else if(!quote&&c==')')depth--;
+            if(depth<0)break;
+        }
+        if(quote||depth!=0){if(error)*error=[self err:(quote?@"Unterminated string literal":@"Unbalanced parentheses") line:i];return NO;}
+
+        if([u isEqual:@"END SUB"]||[u isEqual:@"END FUNCTION"]||[u isEqual:@"END INTERFACE"]||[u isEqual:@"END IF"]||[u isEqual:@"ENDIF"]||[u isEqual:@"WEND"]||[u hasPrefix:@"NEXT"]){
+            NSString *wanted=([u isEqual:@"END SUB"]?@"SUB":([u isEqual:@"END FUNCTION"]?@"FUNCTION":([u isEqual:@"END INTERFACE"]?@"INTERFACE":(([u isEqual:@"END IF"]||[u isEqual:@"ENDIF"])?@"IF":([u isEqual:@"WEND"]?@"WHILE":@"FOR")))));
+            if(!blocks.count||![[blocks lastObject]isEqual:wanted]){if(error)*error=[self err:[NSString stringWithFormat:@"Unexpected %@",line] line:i];return NO;}
+            [blocks removeLastObject];continue;
+        }
+        if([u hasPrefix:@"SUB "])[blocks addObject:@"SUB"];
+        else if([u hasPrefix:@"FUNCTION "])[blocks addObject:@"FUNCTION"];
+        else if([u hasPrefix:@"INTERFACE "]&&![u hasPrefix:@"INTERFACE NEW "]&&![u hasPrefix:@"INTERFACE BIND "])[blocks addObject:@"INTERFACE"];
+        else if([u hasPrefix:@"FOR "])[blocks addObject:@"FOR"];
+        else if([u hasPrefix:@"WHILE "])[blocks addObject:@"WHILE"];
+        else if([u hasPrefix:@"IF "]&&[u hasSuffix:@" THEN"])[blocks addObject:@"IF"];
+
+        BOOL known=[assignment firstMatchInString:line options:0 range:NSMakeRange(0,line.length)]!=nil;
+        for(NSString *prefix in prefixes)if([u hasPrefix:prefix]){known=YES;break;}
+        if(!known){NSString *name=[[[line componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]firstObject]uppercaseString];
+            NSRange par=[name rangeOfString:@"("];if(par.location!=NSNotFound)name=[name substringToIndex:par.location];
+            known=[procedures containsObject:name];
+        }
+        if(!known){if(error)*error=[self err:[NSString stringWithFormat:@"Unknown statement or procedure '%@'",line] line:i];return NO;}
+    }
+    if(blocks.count){if(error)*error=[self err:[NSString stringWithFormat:@"Missing terminator for %@ block",[blocks lastObject]] line:sourceLines.count?sourceLines.count-1:0];return NO;}
+    return YES;
+}
+
 - (BOOL)runSource:(NSString *)source error:(NSError **)error {
+    if(![self validateSource:source error:error])return NO;
     self.stopped=NO;self.labelLines=[NSMutableDictionary dictionary];NSMutableArray *prepared=[NSMutableArray array];
     for(NSString *original in [source componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]){
         NSString *line=original;NSString *trim=MBTrim(line);

@@ -56,5 +56,6 @@
 @property (atomic) BOOL tracing;
 - (void)setBreakpoints:(NSIndexSet *)breakpoints;
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform;
+- (BOOL)validateSource:(NSString *)source error:(NSError **)error;
 - (BOOL)runSource:(NSString *)source error:(NSError **)error;
 @end
