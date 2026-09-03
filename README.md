@@ -87,7 +87,10 @@ In the editor, **Run** executes at full speed. **Trace** runs the same program
 more slowly while highlighting and scrolling to each source line as it is
 executed. **Stop** pauses a trace so **Step** can execute one line at a time;
 press **Stop** again to end it. **Run** or **Trace** resumes a paused program
-in that mode.
+in that mode. A sidebar displays Globals and the current procedure’s Locals,
+updated before the highlighted line executes. Locals include inherited values
+in the procedure’s scope. Arrays show their bounds, default value, and assigned
+elements. The sidebar also appears at breakpoints and closes when execution ends.
 
 Compile a source document with **File → Compile…** or the Compile button in the
 document window. Choose either a native application wrapper or a standalone
@@ -146,6 +149,11 @@ desired; native window operations are ignored in that mode.
 - Procedures: `SUB` / `END SUB`, `FUNCTION` / `RETURN` / `END FUNCTION`.
 - Built-ins: `PRINT`, `INPUT`, `WINDOW OPEN`, `WINDOW CLOSE`,
   `PROCESS RUN`, `SLEEP`, `RND`, `STR$`, `VAL`, and `LEN`.
+- `OPENPANEL$([title$[, directory$[, allowedTypes$]]])` displays an open-file
+  panel and returns the selected path, or an empty string when cancelled.
+  `SAVEPANEL$([title$[, directory$[, defaultName$[, allowedTypes$]]]])` does
+  the same for a save destination. `allowedTypes$` is a comma-separated list
+  of filename extensions, such as `"png,jpg"`.
 - `WINDOW OPEN id, title, width, height[, x, y]` creates a window identified
   by a positive numeric ID. Coordinates are optional screen coordinates.
   `WINDOW CLOSE id` closes that window without depending on its title.

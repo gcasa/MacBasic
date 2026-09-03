@@ -13,6 +13,8 @@
     [self writeText:prompt]; char buffer[4096] = {0};
     return fgets(buffer, sizeof buffer, stdin) ? [NSString stringWithUTF8String:buffer] : @"";
 }
+- (NSString *)openPanelWithTitle:(NSString *)title directory:(NSString *)directory allowedTypes:(NSString *)allowedTypes { return @""; }
+- (NSString *)savePanelWithTitle:(NSString *)title directory:(NSString *)directory defaultName:(NSString *)defaultName allowedTypes:(NSString *)allowedTypes { return @""; }
 - (void)openWindowWithID:(NSInteger)windowID title:(NSString *)t width:(CGFloat)w height:(CGFloat)h x:(CGFloat)x y:(CGFloat)y {
     fprintf(stderr, "MacBasic: WINDOW OPEN ignored in console mode (ID %ld, %s)\n",(long)windowID,t.UTF8String);
 }

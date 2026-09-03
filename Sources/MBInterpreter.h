@@ -4,6 +4,8 @@
 - (void)writeText:(NSString *)text;
 - (void)clearText;
 - (NSString *)readInput:(NSString *)prompt;
+- (NSString *)openPanelWithTitle:(NSString *)title directory:(NSString *)directory allowedTypes:(NSString *)allowedTypes;
+- (NSString *)savePanelWithTitle:(NSString *)title directory:(NSString *)directory defaultName:(NSString *)defaultName allowedTypes:(NSString *)allowedTypes;
 - (void)openWindowWithID:(NSInteger)windowID title:(NSString *)title
                    width:(CGFloat)width height:(CGFloat)height x:(CGFloat)x y:(CGFloat)y;
 - (void)closeWindowWithID:(NSInteger)windowID;
@@ -21,6 +23,7 @@
 - (void)runProcess:(NSString *)path arguments:(NSArray<NSString *> *)arguments;
 @optional
 - (void)traceLine:(NSUInteger)line;
+- (void)debugLine:(NSUInteger)line globals:(NSDictionary *)globals locals:(NSDictionary *)locals breakpoint:(BOOL)breakpoint;
 - (void)debugLine:(NSUInteger)line variables:(NSDictionary *)variables breakpoint:(BOOL)breakpoint;
 @end
 
@@ -51,6 +54,7 @@
     NSMutableDictionary *_interfaces;
     NSMutableArray *_threadTasks;
     NSIndexSet *_breakpoints;
+    NSMutableDictionary *_globalVariables;
 }
 @property (atomic) BOOL stopped;
 @property (atomic) BOOL tracing;

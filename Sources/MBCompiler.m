@@ -42,6 +42,8 @@ static NSString *MBGeneratedMain(NSString *source,BOOL application) {
           @"@interface C:NSObject<MBPlatform>@end\n@implementation C\n"
           "-(void)writeText:(NSString*)s{fputs(s.UTF8String,stdout);fflush(stdout);}"
           "-(void)clearText{}-(NSString*)readInput:(NSString*)p{[self writeText:p];char b[4096]={0};return fgets(b,sizeof b,stdin)?[NSString stringWithUTF8String:b]:@\"\";}"
+          "-(NSString*)openPanelWithTitle:(NSString*)t directory:(NSString*)d allowedTypes:(NSString*)y{return @\"\";}"
+          "-(NSString*)savePanelWithTitle:(NSString*)t directory:(NSString*)d defaultName:(NSString*)n allowedTypes:(NSString*)y{return @\"\";}"
           "-(void)openWindowWithID:(NSInteger)i title:(NSString*)t width:(CGFloat)w height:(CGFloat)h x:(CGFloat)x y:(CGFloat)y{}"
           "-(void)closeWindowWithID:(NSInteger)i{}-(void)addViewWithID:(NSInteger)v toWindowID:(NSInteger)i x:(CGFloat)x y:(CGFloat)y width:(CGFloat)w height:(CGFloat)h{}"
           "-(void)drawCommand:(NSString*)c onViewID:(NSInteger)v arguments:(NSArray*)a{}-(void)playSound:(NSString*)n{}"

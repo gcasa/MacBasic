@@ -62,13 +62,18 @@ else
 endif
 
 test: $(BUILD)/$(APP)
+	clang $(OBJCFLAGS) -I Sources Tests/trace.m Sources/MBInterpreter.m $(LIBS) -o $(BUILD)/trace-test
+	$(BUILD)/trace-test
 	$(BUILD)/$(APP) Tests/language.bas | diff -u Tests/language.expected -
 	$(BUILD)/$(APP) Tests/compatibility.bas | diff -u Tests/compatibility.expected -
 	$(BUILD)/$(APP) Tests/advanced.bas | diff -u Tests/advanced.expected -
+	$(BUILD)/$(APP) Tests/panels.bas | diff -u Tests/panels.expected -
 	$(BUILD)/$(APP) --compile-tool Tests/language.bas $(BUILD)/language-compiled
 	$(BUILD)/language-compiled --console | diff -u Tests/language.expected -
 	$(BUILD)/$(APP) --compile-tool Tests/advanced.bas $(BUILD)/advanced-compiled
 	$(BUILD)/advanced-compiled --console | diff -u Tests/advanced.expected -
+	$(BUILD)/$(APP) --compile-tool Tests/panels.bas $(BUILD)/panels-compiled
+	$(BUILD)/panels-compiled | diff -u Tests/panels.expected -
 	$(BUILD)/$(APP) --compile-app Tests/language.bas $(BUILD)/CompiledLanguage.app
 	test -x $(COMPILED_APP_EXECUTABLE)
 	test -f $(COMPILED_APP_INFO)

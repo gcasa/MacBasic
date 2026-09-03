@@ -186,6 +186,8 @@ static NSColor *MBColor(id value) {
 @property (copy) NSDictionary *debugVariables;
 @property (retain) MBGutterView *gutter;
 @property (retain) NSTextField *variableInspector;
+@property (retain) NSTextView *traceVariables;
+@property (retain) NSScrollView *traceSidebar;
 @end
 
 @implementation MBDocument
@@ -198,6 +200,7 @@ static NSColor *MBColor(id value) {
 @synthesize breakpoints=_breakpoints, debugVariables=_debugVariables;
 @synthesize gutter=_gutter;
 @synthesize variableInspector=_variableInspector;
+@synthesize traceVariables=_traceVariables, traceSidebar=_traceSidebar;
 - (instancetype)init {
     if ((self=[super init])) {
         _basicWindows=[[NSMutableDictionary alloc]init];
@@ -391,6 +394,12 @@ static NSColor *MBColor(id value) {
 #endif
     inspector.font=[NSFont userFixedPitchFontOfSize:12];inspector.hidden=YES;inspector.autoresizingMask=NSViewMinXMargin|NSViewMinYMargin;self.variableInspector=inspector;
     NSView *content=window.contentView;[content addSubview:editor];[content addSubview:gutter];[content addSubview:output];[content addSubview:inspector];
+    NSTextView *variablesText=nil;
+    self.traceSidebar=[self scrollWithText:&variablesText frame:NSMakeRect(610,205,280,435) editable:NO];
+    self.traceVariables=variablesText;
+    self.traceSidebar.autoresizingMask=NSViewMinXMargin|NSViewHeightSizable;
+    self.traceSidebar.hidden=YES;
+    [content addSubview:self.traceSidebar];
     [gutter watchScrollView:editor];[gutter synchronizeFrame];
     NSToolbar *toolbar=[[NSToolbar alloc]initWithIdentifier:@"org.macbasic.document.toolbar"];
     toolbar.delegate=self;toolbar.displayMode=NSToolbarDisplayModeIconAndLabel;
@@ -482,10 +491,20 @@ static NSColor *MBColor(id value) {
 - (void)trace:(id)sender {
     [self startProgramTracing:YES];
 }
+- (void)setTraceSidebarVisible:(BOOL)visible {
+    if(!self.traceSidebar||self.traceSidebar.hidden==!visible)return;
+    NSScrollView *editor=self.editor.enclosingScrollView;
+    NSRect frame=editor.frame;
+    frame.size.width+=visible?-290:290;
+    editor.frame=frame;
+    self.traceSidebar.hidden=!visible;
+    [self.gutter synchronizeFrame];
+}
 - (void)startProgramTracing:(BOOL)tracing {
     if(self.programRunning){
         if(self.tracePaused){
             self.interpreter.tracing=tracing;
+            [self setTraceSidebarVisible:tracing];
             [self.traceCondition lock];
             self.tracePaused=NO;self.pendingTraceSteps=0;
             [self.traceCondition broadcast];
@@ -494,6 +513,8 @@ static NSColor *MBColor(id value) {
         }else [self writeText:@"A program is already running.\n"];
         return;
     }
+    self.traceVariables.string=@"Globals\n  (none)\n\nLocals\n  (none)";
+    [self setTraceSidebarVisible:tracing];
     self.programRunning=YES;
     self.tracePaused=NO;self.pendingTraceSteps=0;
     self.output.string=@"";self.interpreter=[[MBInterpreter alloc]initWithPlatform:self];
@@ -517,6 +538,7 @@ static NSColor *MBColor(id value) {
     [self.traceCondition broadcast];
     [self.traceCondition unlock];
     self.programRunning=NO;
+    [self setTraceSidebarVisible:NO];
     self.debugVariables=nil;
     self.variableInspector.hidden=YES;
     self.editor.editable=YES;
@@ -580,12 +602,33 @@ static NSColor *MBColor(id value) {
 }
 - (void)showDebugState:(NSDictionary *)state {
     self.debugVariables=[state objectForKey:@"variables"];
+    if([state objectForKey:@"globals"]){
+        [self setTraceSidebarVisible:YES];
+        NSMutableString *text=[NSMutableString string];
+        for(NSString *scope in @[@"globals",@"locals"]){
+            NSDictionary *values=[state objectForKey:scope];
+            [text appendFormat:@"%@\n",[scope capitalizedString]];
+            if(!values.count)[text appendString:@"  (none)\n"];
+            for(NSString *name in [[values allKeys]sortedArrayUsingSelector:@selector(compare:)])
+                [text appendFormat:@"%@ = %@\n",name,[values objectForKey:name]];
+            [text appendString:@"\n"];
+        }
+        self.traceVariables.string=text;
+    }
     [self showTracedLine:[state objectForKey:@"line"]];
     [self updateVariableInspector];
 }
+- (void)debugLine:(NSUInteger)line globals:(NSDictionary *)globals locals:(NSDictionary *)locals breakpoint:(BOOL)breakpoint {
+    NSMutableDictionary *visible=[globals mutableCopy];[visible addEntriesFromDictionary:locals];
+    [self pauseAtDebugState:@{@"line":@(line),@"variables":visible,@"globals":globals,@"locals":locals} breakpoint:breakpoint];
+}
 - (void)debugLine:(NSUInteger)line variables:(NSDictionary *)variables breakpoint:(BOOL)breakpoint {
+    [self pauseAtDebugState:@{@"line":@(line),@"variables":variables?:@{}} breakpoint:breakpoint];
+}
+- (void)pauseAtDebugState:(NSDictionary *)state breakpoint:(BOOL)breakpoint {
+    NSUInteger line=[[state objectForKey:@"line"]unsignedIntegerValue];
     if(breakpoint){[self.traceCondition lock];self.tracePaused=YES;self.pendingTraceSteps=0;[self.traceCondition unlock];}
-    [self performSelectorOnMainThread:@selector(showDebugState:) withObject:@{@"line":@(line),@"variables":variables?:@{}} waitUntilDone:YES];
+    [self performSelectorOnMainThread:@selector(showDebugState:) withObject:state waitUntilDone:YES];
     if(breakpoint)[self writeText:[NSString stringWithFormat:@"Breakpoint at line %lu. Use Step or Run to continue.\n",(unsigned long)line+1]];
     [self.traceCondition lock];
     while(self.tracePaused&&self.pendingTraceSteps==0&&!self.interpreter.stopped)[self.traceCondition wait];
@@ -687,6 +730,44 @@ static NSColor *MBColor(id value) {
     NSMutableDictionary *request=[@{@"prompt":prompt?:@"Input"}mutableCopy];
     [self performSelectorOnMainThread:@selector(collectInput:) withObject:request waitUntilDone:YES];
     return MB_GET(request,@"value")?:@"";
+}
+- (NSArray *)panelTypes:(NSString *)text {
+    NSMutableArray *types=[NSMutableArray array];
+    for(NSString *item in [text componentsSeparatedByString:@","]){
+        NSString *type=[item stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        while([type hasPrefix:@"."])type=[type substringFromIndex:1];
+        if(type.length)[types addObject:type];
+    }
+    return types;
+}
+- (void)collectPanelPath:(NSMutableDictionary *)request {
+    BOOL saving=[MB_GET(request,@"saving")boolValue];
+    NSSavePanel *panel=saving?[NSSavePanel savePanel]:[NSOpenPanel openPanel];
+    NSString *title=MB_GET(request,@"title"),*directory=MB_GET(request,@"directory");
+    if(title.length)panel.title=title;
+    if(directory.length)panel.directoryURL=[NSURL fileURLWithPath:[directory stringByExpandingTildeInPath]];
+    NSArray *types=[self panelTypes:MB_GET(request,@"types")];
+    if(types.count)panel.allowedFileTypes=types;
+    if(saving){NSString *name=MB_GET(request,@"name");if(name.length)panel.nameFieldStringValue=name;}
+    NSInteger response=[panel runModal];
+#if defined(GNUSTEP)
+    BOOL accepted=response==NSOKButton;
+#else
+    BOOL accepted=response==NSModalResponseOK;
+#endif
+    MB_SET(request,@"value",accepted?(panel.URL.path?:@""):@"");
+}
+- (NSString *)panelPathSaving:(BOOL)saving title:(NSString *)title directory:(NSString *)directory name:(NSString *)name types:(NSString *)types {
+    NSMutableDictionary *request=[@{@"saving":@(saving),@"title":title?:@"",@"directory":directory?:@"",
+        @"name":name?:@"",@"types":types?:@"",@"value":@""}mutableCopy];
+    [self performSelectorOnMainThread:@selector(collectPanelPath:) withObject:request waitUntilDone:YES];
+    return MB_GET(request,@"value")?:@"";
+}
+- (NSString *)openPanelWithTitle:(NSString *)title directory:(NSString *)directory allowedTypes:(NSString *)allowedTypes {
+    return [self panelPathSaving:NO title:title directory:directory name:@"" types:allowedTypes];
+}
+- (NSString *)savePanelWithTitle:(NSString *)title directory:(NSString *)directory defaultName:(NSString *)defaultName allowedTypes:(NSString *)allowedTypes {
+    return [self panelPathSaving:YES title:title directory:directory name:defaultName types:allowedTypes];
 }
 - (void)createBasicWindow:(NSDictionary *)spec {
     if(self.closingDocument)return;

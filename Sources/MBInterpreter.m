@@ -344,6 +344,33 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
 @synthesize errorHandlerLine=_errorHandlerLine, currentLine=_currentLine, faultLine=_faultLine;
 @synthesize resumeTarget=_resumeTarget, objects=_objects, defaultTypes=_defaultTypes;
 @synthesize pointers=_pointers, nextPointer=_nextPointer, databases=_databases, interfaces=_interfaces, threadTasks=_threadTasks;
+// Convert runtime objects to immutable display values before crossing to the UI thread.
+- (NSString *)debugValue:(id)value {
+    if([value isKindOfClass:[MBThreadedValue class]])return [self debugValue:[value value]];
+    if([value isKindOfClass:[NSString class]])return [NSString stringWithFormat:@"\"%@\"",value];
+    if([value isKindOfClass:[MBArray class]]){
+        MBArray *array=value;NSMutableArray *items=[NSMutableArray array];
+        for(NSString *key in [[array.values allKeys]sortedArrayUsingSelector:@selector(compare:)])
+            [items addObject:[NSString stringWithFormat:@"(%@) = %@",key,[self debugValue:[array.values objectForKey:key]]]];
+        return [NSString stringWithFormat:@"Array [%@], base %ld, default %@\n  %@",
+            [array.dimensions componentsJoinedByString:@", "],(long)array.lowerBound,
+            [array.elementType isEqual:@"$"]?@"\"\"":@"0",[items componentsJoinedByString:@"\n  "]];
+    }
+    if([value isKindOfClass:[MBLinkedList class]]){
+        NSMutableArray *items=[NSMutableArray array];for(id item in [value values])[items addObject:[self debugValue:item]];
+        return [NSString stringWithFormat:@"List [%@]",[items componentsJoinedByString:@", "]];
+    }
+    if([value isKindOfClass:[MBProcedureRef class]])return [NSString stringWithFormat:@"Procedure %@",[value name]];
+    if([value isKindOfClass:[MBInterfaceInstance class]])return [NSString stringWithFormat:@"Interface %@: %@",[value interfaceName],[value bindings]];
+    return MBString(value);
+}
+- (NSDictionary *)debugSnapshot:(NSDictionary *)variables {
+    NSMutableDictionary *snapshot=[NSMutableDictionary dictionary];
+    for(NSString *name in variables){
+        if(![name hasPrefix:@"__"])[snapshot setObject:[self debugValue:[variables objectForKey:name]] forKey:name];
+    }
+    return [snapshot copy];
+}
 - (void)setBreakpoints:(NSIndexSet *)breakpoints {@synchronized(self){_breakpoints=[breakpoints copy];}}
 - (instancetype)initWithPlatform:(id<MBPlatform>)platform {
     if ((self=[super init])) { self.platform=platform; _procedures=[[NSMutableDictionary alloc]init]; } return self;
@@ -438,7 +465,9 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         if([raw hasSuffix:@":"])continue;
         if([u hasPrefix:@"DATA"]&& (u.length==4||[u characterAtIndex:4]==' '))continue;
         BOOL breakpoint=NO;@synchronized(self){breakpoint=[_breakpoints containsIndex:pc];}
-        if((self.tracing||breakpoint)&&[self.platform respondsToSelector:@selector(debugLine:variables:breakpoint:)])
+        if((self.tracing||breakpoint)&&[self.platform respondsToSelector:@selector(debugLine:globals:locals:breakpoint:)])
+            [self.platform debugLine:pc globals:[self debugSnapshot:_globalVariables] locals:vars==_globalVariables?@{}:[self debugSnapshot:vars] breakpoint:breakpoint];
+        else if((self.tracing||breakpoint)&&[self.platform respondsToSelector:@selector(debugLine:variables:breakpoint:)])
             [self.platform debugLine:pc variables:[vars copy] breakpoint:breakpoint];
         else if(self.tracing&&[self.platform respondsToSelector:@selector(traceLine:)])
             [self.platform traceLine:pc];
@@ -1003,6 +1032,19 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         if([key hasSuffix:@"$"]){const unsigned char *text=sqlite3_column_text(db->statement,(int)column);return text?[NSString stringWithUTF8String:(const char *)text]:@"";}
         return @(sqlite3_column_double(db->statement,(int)column));
     }
+    if([key isEqual:@"OPENPANEL$"]){
+        NSString *title=args.count>0?MBString(MB_GET(args,0)):@"Open";
+        NSString *directory=args.count>1?MBString(MB_GET(args,1)):@"";
+        NSString *types=args.count>2?MBString(MB_GET(args,2)):@"";
+        return [self.platform openPanelWithTitle:title directory:directory allowedTypes:types]?:@"";
+    }
+    if([key isEqual:@"SAVEPANEL$"]){
+        NSString *title=args.count>0?MBString(MB_GET(args,0)):@"Save";
+        NSString *directory=args.count>1?MBString(MB_GET(args,1)):@"";
+        NSString *name=args.count>2?MBString(MB_GET(args,2)):@"";
+        NSString *types=args.count>3?MBString(MB_GET(args,3)):@"";
+        return [self.platform savePanelWithTitle:title directory:directory defaultName:name allowedTypes:types]?:@"";
+    }
     if([key isEqual:@"LEN"])return @([MBString(args.firstObject) length]);
     if([key isEqual:@"LBOUND"]&&[args.firstObject isKindOfClass:[MBArray class]])return @([(MBArray *)args.firstObject lowerBound]);
     if([key isEqual:@"UBOUND"]&&[args.firstObject isKindOfClass:[MBArray class]]){
@@ -1200,7 +1242,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
             }
         }
     }
-    NSMutableDictionary *globals=[NSMutableDictionary dictionary];BOOL ok=[self executeFrom:0 to:self.lines.count variables:globals result:NULL returned:NULL error:error];
+    NSMutableDictionary *globals=[NSMutableDictionary dictionary];_globalVariables=globals;BOOL ok=[self executeFrom:0 to:self.lines.count variables:globals result:NULL returned:NULL error:error];
     if(!ok&&self.errorHandlerLine){
         self.faultLine=self.currentLine;NSError *fault=error?*error:nil;MB_SET(globals,@"ERR",@(fault.code));MB_SET(globals,@"ERL",@(self.faultLine+1));
         if(error)*error=nil;self.resumeTarget=nil;
