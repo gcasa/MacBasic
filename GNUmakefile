@@ -52,5 +52,7 @@ check:: all
 	./MacBasic.app/MacBasic Tests/compatibility.bas | diff -u Tests/compatibility.expected -
 
 test:: all
+	clang $(MACBASIC_RUNTIME_OBJCFLAGS) -I Sources Tests/trace.m Sources/MBInterpreter.m $(shell gnustep-config --gui-libs) -lsqlite3 -o build/trace-test
+	build/trace-test
 	./MacBasic.app/MacBasic Tests/language.bas | diff -u Tests/language.expected -
 	./MacBasic.app/MacBasic Tests/compatibility.bas | diff -u Tests/compatibility.expected -

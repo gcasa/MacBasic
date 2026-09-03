@@ -6,4 +6,4 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
-CMD ["/bin/bash", "-lc", "cp -a /src /work/MacBasic && cd /work/MacBasic && . /usr/share/GNUstep/Makefiles/GNUstep.sh && make clean && make && test -x build/MacBasic.app/MacBasic && test -f build/MacBasic.app/Resources/Info-gnustep.plist && make test"]
+CMD ["/bin/bash", "-lc", "cp -a /src /work/MacBasic && cd /work/MacBasic && . /usr/share/GNUstep/Makefiles/GNUstep.sh && make -f Makefile clean && make -f Makefile && test -x build/MacBasic.app/MacBasic && test -f build/MacBasic.app/Resources/Info-gnustep.plist && make -f Makefile test"]

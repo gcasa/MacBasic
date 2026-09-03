@@ -99,7 +99,11 @@ static NSColor *MBColor(id value) {
 - (void)toggleBreakpointAtLine:(NSUInteger)line;
 @end
 
-@interface MBGutterView : NSView
+@interface MBGutterView : NSView {
+    __unsafe_unretained id<MBGutterDelegate> _gutterDelegate;
+    __unsafe_unretained NSTextView *_textView;
+    __unsafe_unretained NSScrollView *_scrollView;
+}
 @property (assign) id<MBGutterDelegate> gutterDelegate;
 @property (assign) NSTextView *textView;
 @property (assign) NSScrollView *scrollView;
@@ -107,6 +111,7 @@ static NSColor *MBColor(id value) {
 @end
 
 @implementation MBGutterView
+@synthesize gutterDelegate=_gutterDelegate, textView=_textView, scrollView=_scrollView;
 - (BOOL)isFlipped {return YES;}
 - (BOOL)isOpaque {return NO;}
 - (NSView *)hitTest:(NSPoint)point {return point.x<44?[super hitTest:point]:nil;}
@@ -492,7 +497,7 @@ static NSColor *MBColor(id value) {
     [self startProgramTracing:YES];
 }
 - (void)setTraceSidebarVisible:(BOOL)visible {
-    if(!self.traceSidebar||self.traceSidebar.hidden==!visible)return;
+    if(!self.traceSidebar||[self.traceSidebar isHidden]==!visible)return;
     NSScrollView *editor=self.editor.enclosingScrollView;
     NSRect frame=editor.frame;
     frame.size.width+=visible?-290:290;

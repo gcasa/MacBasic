@@ -24,6 +24,8 @@
     NSDictionary *_debugVariables;
     MBGutterView *_gutter;
     NSTextField *_variableInspector;
+    NSTextView *_traceVariables;
+    NSScrollView *_traceSidebar;
 }
 - (void)compileDocument:(id)sender;
 - (void)runCompiledSource:(NSString *)source;
