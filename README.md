@@ -88,8 +88,8 @@ more slowly while highlighting and scrolling to each source line as it is
 executed. **Stop** pauses a trace so **Step** can execute one line at a time;
 press **Stop** again to end it. **Run** or **Trace** resumes a paused program
 in that mode. A sidebar displays Globals and the current procedure’s Locals,
-updated before the highlighted line executes. Locals include inherited values
-in the procedure’s scope. Arrays show their bounds, default value, and assigned
+updated before the highlighted line executes. Locals include only parameters and
+variables assigned in the current procedure, excluding inherited values. Arrays show their bounds, default value, and assigned
 elements. The sidebar also appears at breakpoints and closes when execution ends.
 
 Compile a source document with **File → Compile…** or the Compile button in the

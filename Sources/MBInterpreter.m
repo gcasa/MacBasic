@@ -25,6 +25,43 @@ static void MBSet(id collection,id key,id value) {
 #define MB_GET(collection,key) MBGet((collection),MB_KEY(key))
 #define MB_SET(collection,key,value) MBSet((collection),MB_KEY(key),(value))
 
+// Keep inherited values available to execution without presenting them as locals.
+@interface MBProcedureVariables : NSMutableDictionary {
+    NSMutableDictionary *_values;
+    NSMutableDictionary *_localValues;
+}
+@property (readonly) NSDictionary *localValues;
+- (instancetype)initWithInheritedVariables:(NSDictionary *)variables;
+@end
+@implementation MBProcedureVariables
+- (instancetype)initWithCapacity:(NSUInteger)capacity {
+    if((self=[super init])){
+        _values=[[NSMutableDictionary alloc]initWithCapacity:capacity];
+        _localValues=[[NSMutableDictionary alloc]init];
+    }
+    return self;
+}
+- (instancetype)initWithInheritedVariables:(NSDictionary *)variables {
+    if((self=[self initWithCapacity:variables.count]))[_values addEntriesFromDictionary:variables];
+    return self;
+}
+- (NSUInteger)count {return _values.count;}
+- (NSEnumerator *)keyEnumerator {return [_values keyEnumerator];}
+- (id)objectForKey:(id)key {return [_values objectForKey:key];}
+- (void)setObject:(id)value forKey:(id<NSCopying>)key {
+    [_values setObject:value forKey:key];
+    [_localValues setObject:value forKey:key];
+}
+- (void)removeObjectForKey:(id)key {
+    [_values removeObjectForKey:key];
+    [_localValues removeObjectForKey:key];
+}
+- (NSDictionary *)localValues {return _localValues;}
+#if !__has_feature(objc_arc)
+- (void)dealloc {[_values release];[_localValues release];[super dealloc];}
+#endif
+@end
+
 static NSString *MBTrim(NSString *s) {
     return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
@@ -466,7 +503,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
         if([u hasPrefix:@"DATA"]&& (u.length==4||[u characterAtIndex:4]==' '))continue;
         BOOL breakpoint=NO;@synchronized(self){breakpoint=[_breakpoints containsIndex:pc];}
         if((self.tracing||breakpoint)&&[self.platform respondsToSelector:@selector(debugLine:globals:locals:breakpoint:)])
-            [self.platform debugLine:pc globals:[self debugSnapshot:_globalVariables] locals:vars==_globalVariables?@{}:[self debugSnapshot:vars] breakpoint:breakpoint];
+            [self.platform debugLine:pc globals:[self debugSnapshot:_globalVariables] locals:[vars isKindOfClass:[MBProcedureVariables class]]?[self debugSnapshot:[(MBProcedureVariables *)vars localValues]]:@{} breakpoint:breakpoint];
         else if((self.tracing||breakpoint)&&[self.platform respondsToSelector:@selector(debugLine:variables:breakpoint:)])
             [self.platform debugLine:pc variables:[vars copy] breakpoint:breakpoint];
         else if(self.tracing&&[self.platform respondsToSelector:@selector(traceLine:)])
@@ -1125,7 +1162,7 @@ static NSString *MBByteString(const void *bytes,NSUInteger length) {
     }
     if([key isEqual:@"VARPTR"]||[key isEqual:@"SADD"])return @((NSUInteger)(__bridge void *)args.firstObject);
     NSDictionary *p=MB_GET(self.procedures,key); if(!p){if(error)*error=[self err:[NSString stringWithFormat:@"Unknown statement or procedure '%@'",name] line:0];return nil;}
-    NSMutableDictionary *local=[caller mutableCopy]; NSArray *params=MB_GET(p,@"params");
+    NSMutableDictionary *local=[[MBProcedureVariables alloc]initWithInheritedVariables:caller]; NSArray *params=MB_GET(p,@"params");
     for(NSUInteger i=0;i<params.count;i++){NSString *paramName=[MB_GET(params,i) uppercaseString];MB_SET(local,paramName,[self coerceValue:(i<args.count?MB_GET(args,i):@0) forName:paramName]);}
     id value=@0;BOOL returned=NO;
     [self executeFrom:[MB_GET(p,@"start") unsignedIntegerValue] to:[MB_GET(p,@"end") unsignedIntegerValue] variables:local result:&value returned:&returned error:error];
